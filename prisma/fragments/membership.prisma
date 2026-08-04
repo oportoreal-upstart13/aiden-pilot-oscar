@@ -1,0 +1,19 @@
+// Membership — join table granting a User a role within an Org.
+// role is a free-text string: "owner" | "agent" | "viewer".
+//   owner:  members.manage + ticket.manage (all org tickets)
+//   agent:  ticket.manage (all org tickets), no member management
+//   viewer: read-only across the org's tickets
+
+model Membership {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  role      String
+  createdAt DateTime @default(now())
+  org       Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([userId])
+  @@index([orgId])
+}

@@ -1,0 +1,11 @@
+// Org — the tenant boundary for DeskLine. Every Ticket and Membership
+// is scoped to exactly one Org; queries always filter by orgId derived
+// from the requester's own Membership row, never from client input.
+
+model Org {
+  id          String       @id @default(cuid())
+  name        String
+  createdAt   DateTime     @default(now())
+  memberships Membership[]
+  tickets     Ticket[]
+}

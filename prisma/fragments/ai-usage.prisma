@@ -1,0 +1,19 @@
+// AIUsage — cost/token accounting per AI call. Denormalized (no FK to
+// Org/User) so usage rows survive org/user deletion, same convention as
+// the shipped AuditLog table.
+
+model AIUsage {
+  id               String   @id @default(cuid())
+  orgId            String
+  userId           String
+  route            String
+  model            String
+  promptTokens     Int
+  completionTokens Int
+  costUsd          Decimal  @db.Decimal(10, 6)
+  createdAt        DateTime @default(now())
+
+  @@index([orgId])
+  @@index([userId])
+  @@index([createdAt])
+}

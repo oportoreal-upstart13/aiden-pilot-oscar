@@ -1,0 +1,24 @@
+// Ticket — org-scoped support ticket. `ownerId` is the creator/assignee;
+// named distinctly from `userId` because aiden-security's assertOwnership()
+// expects a `userId` field, so routes pass it a shaped
+// `{ id: ticket.id, userId: ticket.ownerId }` view rather than the raw row.
+
+model Ticket {
+  id        String   @id @default(cuid())
+  orgId     String
+  ownerId   String
+  subject   String
+  body      String
+  status    String   @default("open") // open | pending | closed
+  priority  String?
+  category  String?
+  sentiment String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  org       Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  owner     User     @relation("TicketOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([ownerId])
+  @@index([orgId, status])
+}
