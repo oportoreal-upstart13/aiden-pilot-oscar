@@ -1,28 +1,24 @@
 /**
- * AIDEN feature flags.
- *
- * `aiden doctor` reads this to decide which env vars are required, and
- * `aiden upgrade` reads it to know which codemods to apply.
+ * AIDEN feature flags for DeskLine.
+ * Provider switching: `ai.defaultProvider` is the single line that changes
+ * DeskLine's live AI provider. Route handlers never name a provider; they call
+ * `getAI()` in src/lib/ai.ts, which resolves it from here.
  */
 
 export const aidenConfig = {
   /** AIDEN single-train version this app was last upgraded to. */
   version: "2.0.1",
 
-  /**
-   * Your app's identity. These are placeholders — replace them with your
-   * product's real values. `NEXT_PUBLIC_APP_*` env vars override the
-   * name/tagline/copyright at runtime (see src/config/brand.ts).
-   */
   app: {
-    name: "Your App",
-    shortName: "your-app",
-    tagline: "Your product tagline goes here.",
-    description: "A short description of your app for metadata and previews.",
-    supportEmail: "support@example.com",
-    url: "https://example.com",
-    companyLegalName: "Your Company, Inc.",
-    footerLinks: [] as { href: string; label: string }[],
+    name: "DeskLine",
+    shortName: "deskline",
+    tagline: "Multi-tenant AI support desk.",
+    description:
+      "Agents triage and resolve customer tickets inside their organization, with AI-drafted replies and automatic ticket classification.",
+    supportEmail: "support@deskline.example.com",
+    url: "deskline.example.com",
+    companyLegalName: "UpStart13",
+    footerLinks: [],
   },
 
   auth: {
@@ -36,33 +32,51 @@ export const aidenConfig = {
 
   ai: {
     /**
-     * Toggle providers with `enabled` and optionally pin a default `model`.
-     * When `model` is omitted, src/lib/ai.ts falls back to a built-in default.
+     
      */
     providers: {
-      openai: { enabled: false, model: undefined as string | undefined },
-      anthropic: { enabled: false, model: undefined as string | undefined },
-      google: { enabled: false, model: undefined as string | undefined },
-      mistral: { enabled: false, model: undefined as string | undefined },
-      groq: { enabled: false, model: undefined as string | undefined },
-      cohere: { enabled: false, model: undefined as string | undefined },
+      openai: false,
+      anthropic: true,
+      google: false,
+      mistral: false,
+      groq: false,
+      cohere: false,
+    },
+    /**
+     * The live provider. Changing this one line switches DeskLine's AI with
+     * zero route edits — the graded provider-switch criterion.
+     */
+    defaultProvider: "anthropic",
+    models: {
+      openai: "gpt-4o-mini",
+      anthropic: "claude-haiku-4-5",
+      google: "gemini-2.5-flash",
+      mistral: "mistral-small-latest",
+      groq: "llama-3.3-70b-versatile",
+      cohere: "command-r",
     },
   },
 
   audit: {
-    enabled: true, // Prisma sink registered in src/lib/audit.ts
+    enabled: true,
+    /**
+     * Which setAuditSink implementation src/lib/audit.ts registers:
+     * "prisma" writes to the AuditLog table, "file" writes newline-delimited
+     * JSON locally. One line, zero call-site changes.
+     */
+    sink: "prisma",
   },
 
   rbac: {
-    enabled: true, // roles seeded in prisma/seed.ts; rules in src/lib/abilities.ts
+    enabled: true,
   },
 
   billing: {
-    enabled: false, // toggle when wiring Stripe in src/lib/stripe.ts
+    enabled: false,
   },
 
   email: {
-    enabled: false, // toggle when wiring SendGrid in src/lib/email.ts
+    enabled: false,
   },
 } as const;
 

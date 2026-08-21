@@ -1,5 +1,5 @@
 {
-  "name": "deskline-scaffold",
+  "name": "deskline",
   "version": "0.0.0",
   "private": true,
   "scripts": {
@@ -55,6 +55,9 @@
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.1"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"

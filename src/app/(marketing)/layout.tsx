@@ -17,7 +17,7 @@ export default async function MarketingLayout({
       <main className="flex-1">{children}</main>
       <SiteFooter
         brand={brand}
-        links={aidenConfig.app.footerLinks}
+        links={[...aidenConfig.app.footerLinks]}
         tagline={brand.tagline}
         copyright={copyright}
       />
