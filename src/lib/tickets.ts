@@ -75,6 +75,17 @@ export const ticketOwnershipSelect = {
 } satisfies Prisma.TicketSelect;
 
 /**
+ * What the draft route needs: the two ownership fields plus the content
+ * the prompt fences. The row never leaves the server on that route.
+ */
+export const ticketDraftSelect = {
+  id: true,
+  ownerId: true,
+  subject: true,
+  body: true,
+} satisfies Prisma.TicketSelect;
+
+/**
  * Step two: the ownership step, adapted to `Ticket`.
  *
  * `assertOwnership` compares a literal `resource.userId`; `Ticket` carries

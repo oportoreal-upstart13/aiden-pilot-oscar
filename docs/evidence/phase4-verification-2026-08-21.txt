@@ -1,0 +1,140 @@
+DeskLine — phase 4 live verification
+Date:  2026-08-21
+Build: npm run build (exit 0), npm start -p 3100 (production build)
+Scope: SSE draft route, streaming usage correlation, auth audit sink,
+       graded probe 6. The adversarial injection probe has its own file,
+       docs/evidence/injection-probe-2026-08-21.txt.
+
+────────────────────────────────────────────────────────────────────────
+ITEM 4 — audit.auth.signin now reaches the table (closes failure 4b)
+────────────────────────────────────────────────────────────────────────
+
+  Change under test: src/lib/auth.ts gained a side-effect
+  `import "@/lib/audit"`. It must import @/lib/audit directly — routing
+  it through src/lib/security.ts to inherit the registration would be a
+  cycle, since security.ts imports auth.ts for configureSecurity's
+  getSession.
+
+  Before (phase 3 state):
+     ai.classify   | 1
+     ticket.create | 2
+     -- no auth event; it went to the default logger sink
+
+  Sign in as agent1@acme.test -> HTTP 302
+
+  After:
+       event     | count
+  ---------------+-------
+   ai.classify   |     1
+   auth.signin   |     1     <- new
+   ticket.create |     2
+
+  PASS. The event name in the table is `auth.signin`; the `audit.`
+  prefix seen in phase 3's log line was the logger's message field, not
+  the event name.
+
+────────────────────────────────────────────────────────────────────────
+ITEM 2 — the streaming usage window
+────────────────────────────────────────────────────────────────────────
+
+  The open question going in: `recordAIUsage` stamps `requestId` from the
+  AsyncLocalStorage store *at emission time*
+  (aiden-logging/dist/index.js:51-58), and for a stream the usage record
+  is emitted from inside the ReadableStream, after the handler has
+  already returned its Response. If the store were gone by then,
+  `requestId` would be undefined, the sink could not correlate, and the
+  row would be dropped.
+
+  It is not gone. `createAIStreamResponse` constructs the stream inside
+  the handler — therefore inside `withRequestContext`'s run — and async
+  continuations scheduled from there inherit the store even after run()
+  returns.
+
+  ai_usage after the draft:
+
+   route                        | model            | prompt | compl | cost_usd | org_id
+  ------------------------------+------------------+--------+-------+----------+----------
+   POST /api/tickets            | claude-haiku-4-5 |    247 |    35 | 0.000338 | org_acme
+   POST /api/tickets            | claude-haiku-4-5 |    263 |    35 | 0.000350 | org_acme
+   POST /api/tickets/[id]/draft | claude-haiku-4-5 |    413 |    97 | 0.000718 | org_acme   <- new
+
+  PASS, and it settles F3 on the streaming path: with Anthropic the
+  streamed call reports REAL counts, not zero. 413 prompt / 97 completion
+  tokens, matching the usage block in the SSE `event: done` frame exactly.
+  The estimated-usage fallback the v1 plan contemplated remains correctly
+  out of scope.
+
+  The OpenAI streaming gap is unchanged and untested here — that adapter
+  never sets `stream_options: { include_usage: true }`, so a streamed
+  call on OpenAI would report zero. That is the row to show and explain
+  during the provider-switch demonstration.
+
+  Window management: `beginAICall` is called before the stream is
+  consumed and `endAICall` from both `onDone` and `onError`.
+  `withAIUsageContext` is deliberately not used on this route — it closes
+  on promise resolution, which for a stream is long before the record is
+  emitted. Ordering inside `createAIStreamResponse` makes this safe: it
+  calls `finalResponse()` (which reaches the sink) at line 81 and
+  `onDone` at line 85, and the sink reads the correlation map
+  synchronously before its first await.
+
+  ai.draft in audit_logs:
+
+   event    | resource_id | metadata
+  ----------+-------------+-----------------------------------------------------------------------
+   ai.draft | tkt_acme_6  | {"tone": "neutral", "model": "claude-haiku-4-5", "orgId": "org_acme"}
+
+  Metadata is exactly what Dimension 6 specifies. No ticket content, no
+  prompt, no draft text.
+
+────────────────────────────────────────────────────────────────────────
+ITEM 6 — graded probe 6: a viewer is denied the draft route
+────────────────────────────────────────────────────────────────────────
+
+  Sign in as viewer@acme.test (org role "viewer" in org_acme) -> 302
+
+  POST /api/tickets/tkt_acme_6/draft
+    -> HTTP 403   {"error":"Forbidden"}
+
+  Control, to show the 403 is a role denial and not an ownership one:
+
+  GET /api/tickets/tkt_acme_6
+    -> HTTP 200
+
+  The viewer can read the ticket and cannot draft on it. That is the
+  intended shape: the ownership step degenerates to a presence check for
+  viewers, so it passes, and `assertCan("ticket.draft")` is what denies —
+  403 rather than 404. A 403 leaks nothing here, because the caller is
+  already authorised to see that the row exists.
+
+  Auto-emitted denial event:
+
+   event                   | metadata
+  -------------------------+------------------------------------------------------
+   security.ability_denied | {"action": "ticket.draft", "actorRoles": ["member"]}
+
+  Note `actorRoles: ["member"]` — that is the caller's *global* NextAuth
+  role, not the org role ("viewer") that actually decided the denial. The
+  SDK emits this from inside `withAuth` and can only see what is on the
+  session. This is a further edge of plan finding F9: auto-emitted denial
+  events are not only missing `orgId`, they also record the wrong role
+  vocabulary for an app whose authorization lives in Membership. Worth
+  adding to the upstream report; the admin audit viewer must not present
+  `actorRoles` as if it explained the denial.
+
+────────────────────────────────────────────────────────────────────────
+STATE AFTER THE RUN
+────────────────────────────────────────────────────────────────────────
+
+       event          | count
+  ----------------------+-------
+   ai.classify          |     1
+   ai.draft             |     1
+   auth.signin          |     1
+   security.ability_denied |  1
+   ticket.create        |     2
+
+  ai_usage: 3 rows, all with real provider-reported counts.
+  tickets:  12 — the seeded set, unchanged. The draft route writes no
+            ticket rows, by design: the agent edits and sends the reply
+            outside DeskLine's scope.
