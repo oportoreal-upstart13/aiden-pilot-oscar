@@ -565,3 +565,12 @@ The build is verified against this document, not against memory:
 
 Every deviation surfaced during the build is recorded in the deviation log at the
 top of this document, with a date and root cause. None is silently absorbed.
+
+**Prior exploration.** An earlier, unplanned DeskLine build exists in this
+repository on `main` (commit `1213755`, 2026-08-04). It is retained, not
+discarded: it is where several of the findings above were first encountered.
+This certification attempt begins on the `certification` branch, whose history
+starts with the starter scaffold, followed by this plan, followed by approval —
+and no DeskLine feature code before that point. The earlier build is treated as
+the author's own reference material and is not copied forward; every file in
+this attempt is written against this plan and verified against it.
