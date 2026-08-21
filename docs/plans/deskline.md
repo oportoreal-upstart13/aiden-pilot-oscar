@@ -48,6 +48,26 @@ repository's actual state. Pending approval.
 >   have seen a colleague's ticket in the list and received a 404 opening it.
 >   The list and the detail must agree; `orgTicketsWhere` now takes the active
 >   membership and applies the same boundary the detail read enforces.
+> - **D4 · 2026-08-21 · `src/lib/routes.ts` ships two adapters and no cast,
+>   and validates params.** Recorded because Dimension 5 said "the cast lives
+>   **once**" and invited the shape to be settled at implementation time. Root
+>   cause: a wrapper function whose second parameter is *required* satisfies
+>   Next's `SecondArg` constraint outright, so the cast is unnecessary rather
+>   than merely centralised; a second adapter for non-dynamic routes returns a
+>   one-parameter function, which drives `SecondArg` to `any` and satisfies the
+>   constraint trivially. The adapter additionally Zod-validates the resolved
+>   `id` — `withAuth`'s `ctx?.params ?? {}` can yield an `undefined` id typed
+>   `string`, and Prisma omits `undefined` filters, so an unvalidated id reaches
+>   the database as "no filter" and returns the wrong row rather than none.
+> - **D5 · 2026-08-21 · `assertTicketOwnership` is generic over
+>   `Pick<Ticket, "id" | "ownerId">` instead of taking `Ticket`.** The code
+>   block in Dimension 5 is updated to match. Root cause: giving a route an
+>   explicit `select` — so its response returns a declared projection rather
+>   than every column — produces a partial row that no longer satisfies
+>   `Ticket`. Fixing the type to the full model would have forced every route
+>   to over-fetch purely to satisfy the helper. The constraint names the only
+>   two fields the helper reads, so the semantics are unchanged and the
+>   assertion signature still propagates narrowing to the caller.
 
 ---
 
@@ -350,11 +370,13 @@ for that distinction to live.
 One helper in `src/lib/tickets.ts` adapts the row and delegates:
 
 ```ts
-export function assertTicketOwnership(
-  row: Ticket | null,
+export function assertTicketOwnership<
+  T extends Pick<Ticket, "id" | "ownerId">,
+>(
+  row: T | null,
   membership: OrgMembership,
   userId: string,
-): asserts row is Ticket {
+): asserts row is T {
   assertOwnership(
     row && {
       id: row.id,
@@ -390,10 +412,21 @@ one helper.
 
 The SDK types the handler context as optional (`ctx?: { params: P }`) while Next
 passes it as required; the starter's own dynamic route resolves this with a cast
-at the export. With six dynamic routes planned, the cast lives **once**, in a
-typed helper in `src/lib/routes.ts`, alongside
-`type RouteParams = Promise<{ id: string }>`. Its exact shape is settled against
-the SDK's types at implementation time and recorded here if it deviates.
+at the export. `src/lib/routes.ts` holds `type RouteParams = Promise<{ id: string }>`
+and two adapters — `withAuthIdRoute` and `withAuthRoute` — that return real
+wrapper functions with the arity Next's `SecondArg` extraction expects, so **no
+cast is needed anywhere**, not even once (D4).
+
+`withAuthIdRoute` also **Zod-validates the resolved params before the handler
+runs**. This is not defensive tidiness: `withAuth` computes
+`ctx?.params ?? {}`, so an absent context yields `{}` typed as
+`Promise<{ id: string }>`, making `(await params).id` `undefined` while the type
+claims `string`. Prisma *omits* `undefined` filters rather than matching them
+against null, so `findFirst({ where: { id: undefined, orgId } })` would return
+the organization's first ticket, and the ownership step would pass it for owners
+and viewers because for them it is only a presence check. A wrong-row read, no
+error, on both graded capabilities. No query in the app can see an unvalidated
+id.
 
 ### Active organization resolution (the multi-org piece)
 

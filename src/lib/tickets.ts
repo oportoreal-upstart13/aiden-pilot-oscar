@@ -44,6 +44,37 @@ export function orgTicketsWhere(
 }
 
 /**
+ * The projection every route returning a single ticket uses, so the
+ * response shape is declared in one place instead of being "whatever
+ * columns the model happens to have".
+ *
+ * `orgId` is deliberately absent: the caller's organization is a
+ * server-resolved fact, not something a ticket payload should carry.
+ */
+export const ticketDetailSelect = {
+  id: true,
+  subject: true,
+  body: true,
+  status: true,
+  priority: true,
+  category: true,
+  sentiment: true,
+  ownerId: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.TicketSelect;
+
+/**
+ * The minimum a route needs to run the ownership step — exactly the two
+ * fields `assertTicketOwnership` reads. Used where the fetched row is a
+ * gate rather than the response.
+ */
+export const ticketOwnershipSelect = {
+  id: true,
+  ownerId: true,
+} satisfies Prisma.TicketSelect;
+
+/**
  * Step two: the ownership step, adapted to `Ticket`.
  *
  * `assertOwnership` compares a literal `resource.userId`; `Ticket` carries
@@ -59,7 +90,11 @@ export function orgTicketsWhere(
  *    turning the cross-tenant and missing-id cases into 500s. Those are
  *    exactly the two probes that must return 404.
  * 2. The assertion signature is declared on a `function`, so callers
- *    narrow `row` from `Ticket | null` to `Ticket`. `assertOwnership`'s
+ *    narrow `row` from `T | null` to `T`. It is generic over
+ *    `Pick<Ticket, "id" | "ownerId">` rather than fixed to `Ticket` so a
+ *    route can `select` exactly the columns its response returns instead
+ *    of over-fetching the whole row just to satisfy the type.
+ *    `assertOwnership`'s
  *    own assertion cannot do that here: it is applied to a freshly
  *    constructed object literal rather than to a reference, so it narrows
  *    nothing the caller can use. Callers must pass `row` directly — an
@@ -74,11 +109,13 @@ export function orgTicketsWhere(
  * stay distinguishable server-side in `AuditLog`, via the auto-emitted
  * `reason: "resource_not_found"` versus `reason: "wrong_owner"`.
  */
-export function assertTicketOwnership(
-  row: Ticket | null,
+export function assertTicketOwnership<
+  T extends Pick<Ticket, "id" | "ownerId">,
+>(
+  row: T | null,
   membership: OrgMembership,
   userId: string
-): asserts row is Ticket {
+): asserts row is T {
   assertOwnership(
     row && {
       id: row.id,

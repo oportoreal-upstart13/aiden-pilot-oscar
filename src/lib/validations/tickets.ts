@@ -15,6 +15,45 @@ export const DRAFT_TONES = ["neutral", "apologetic", "concise"] as const;
 /** A draft tone, e.g. `"apologetic"`. */
 export type DraftTone = (typeof DRAFT_TONES)[number];
 
+// ─── AI triage vocabulary ────────────────────────────────────────────────
+//
+// The closed sets AI triage may assign. They live here, not in
+// `ai-prompts.ts`, so the phase 4 badge components can import them without
+// dragging server-only AI wiring into a client bundle. `ai-prompts.ts`
+// builds the Zod contract and the JSON Schema mirror from these.
+//
+// Every value the seed pre-classifies falls inside these sets.
+
+/** Priorities AI triage may assign. */
+export const TICKET_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
+
+/** A ticket priority, e.g. `"high"`. */
+export type TicketPriority = (typeof TICKET_PRIORITIES)[number];
+
+/** Categories AI triage may assign. */
+export const TICKET_CATEGORIES = [
+  "billing",
+  "technical",
+  "hardware",
+  "data",
+  "account",
+  "other",
+] as const;
+
+/** A ticket category, e.g. `"billing"`. */
+export type TicketCategory = (typeof TICKET_CATEGORIES)[number];
+
+/** Sentiments AI triage may assign. */
+export const TICKET_SENTIMENTS = [
+  "positive",
+  "neutral",
+  "frustrated",
+  "angry",
+] as const;
+
+/** A ticket sentiment, e.g. `"frustrated"`. */
+export type TicketSentiment = (typeof TICKET_SENTIMENTS)[number];
+
 /**
  * `GET /api/tickets`. Any status may be *filtered* on, including closed.
  * `limit` is bounded rather than optional so a list read cannot be turned

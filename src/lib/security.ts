@@ -6,6 +6,16 @@ import {
 } from "@upstart13-com/aiden-security";
 import { auth } from "@/lib/auth";
 
+// Side-effect import: registers the Prisma audit sink from inside the
+// route module graph. `instrumentation.ts` also imports it, but Next
+// bundles that into a separate server chunk that can hold its own copy of
+// `aiden-security` — a sink registered only there lands on an instance the
+// handlers never resolve, and every audit event silently falls through to
+// the default logger sink while `audit_logs` stays empty and `npm ls`
+// looks clean. Every route imports this module, so registering here puts
+// the sink on the instance the handlers actually use.
+import "@/lib/audit";
+
 configureSecurity({ getSession: () => auth() });
 
 /**

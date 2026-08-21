@@ -1,0 +1,227 @@
+DeskLine — phase 3 live verification of the audit sink
+Date:     2026-08-21
+Build:    npm run build (exit 0), npm start -p 3100 (production build)
+Provider: anthropic / claude-haiku-4-5 (aiden.config.ts defaultProvider)
+Persona:  agent1@acme.test (Ben Silva), org role "agent" in org_acme
+
+PURPOSE
+  Prove that auditLog() from a route handler reaches the Prisma sink and
+  lands in audit_logs, rather than falling through to the default logger
+  sink. The sink is registered by a side-effect `import "@/lib/audit"` in
+  src/lib/security.ts, which every route imports — not only from
+  instrumentation.ts, which Next bundles into a separate server chunk.
+
+────────────────────────────────────────────────────────────────────────
+1. BASELINE — audit_logs before the test
+────────────────────────────────────────────────────────────────────────
+
+  $ docker exec u13-postgres psql -U u13admin -d deskline_op_dev \
+      -c "SELECT event, count(*) FROM audit_logs GROUP BY event ORDER BY event;"
+
+   event | count
+  -------+-------
+  (0 rows)
+
+  $ ... -c "SELECT count(*) FROM audit_logs;"
+       0
+
+────────────────────────────────────────────────────────────────────────
+2. AUTHENTICATION (curl, NextAuth v5 credentials)
+────────────────────────────────────────────────────────────────────────
+
+  GET  /api/auth/csrf                      -> 200, csrfToken issued
+  POST /api/auth/callback/credentials      -> 302, session cookie set
+  GET  /api/auth/session                   -> 200
+
+  {"user":{"name":"Ben Silva","email":"agent1@acme.test","image":null,
+   "id":"cmt344vlg00061sdiz4zhk5cr","roles":["member"]},
+   "expires":"2026-09-20T16:53:12.885Z"}
+
+  Note: roles ["member"] is the *global* NextAuth role. The org role
+  ("agent") lives in Membership and is resolved per request — the two
+  authorities the plan keeps separate (F7).
+
+────────────────────────────────────────────────────────────────────────
+3. LIST — GET /api/tickets
+────────────────────────────────────────────────────────────────────────
+
+  {"activeOrgId":"org_acme","role":"agent","count":3,
+   "ids":["tkt_acme_6","tkt_acme_2","tkt_acme_1"]}
+
+  org_acme holds 6 seeded tickets; agent1 owns exactly these three. This
+  is deviation D3 working: the list applies the same ownerId boundary the
+  detail read enforces, so no row appears that would 404 on open.
+
+  No deskline_org cookie was sent, so resolveActiveOrg fell back to the
+  caller's oldest membership, as specified.
+
+────────────────────────────────────────────────────────────────────────
+4. CREATE — POST /api/tickets  -> HTTP 201
+────────────────────────────────────────────────────────────────────────
+
+  {"ticket":{"id":"cmt36uqns00003odivw5vso7s","orgId":"org_acme",
+   "ownerId":"cmt344vlg00061sdiz4zhk5cr",
+   "subject":"Audit sink live verification",
+   "status":"open","priority":null,"category":null,"sentiment":null,
+   "createdAt":"2026-08-21T16:53:28.313Z",
+   "updatedAt":"2026-08-21T16:53:28.313Z"}}
+
+────────────────────────────────────────────────────────────────────────
+5. RESULT — audit_logs after the test
+────────────────────────────────────────────────────────────────────────
+
+  $ ... -c "SELECT event, count(*) FROM audit_logs GROUP BY event ORDER BY event;"
+
+       event     | count
+  ---------------+-------
+   ticket.create |     1
+  (1 row)
+
+  $ ... -c "SELECT event, actor_id IS NOT NULL AS has_actor, resource_id,
+             metadata, timestamp FROM audit_logs ORDER BY timestamp;"
+
+   event         | has_actor | resource_id               | metadata                                | timestamp
+  ---------------+-----------+---------------------------+-----------------------------------------+-------------------------
+   ticket.create | t         | cmt36uqns00003odivw5vso7s | {"orgId": "org_acme", "status": "open"} | 2026-08-21 16:53:28.334
+
+  PASS. The event reached the Prisma sink. actor_id was auto-attached
+  from the request context; metadata carries orgId and status and no
+  ticket content.
+
+────────────────────────────────────────────────────────────────────────
+6. TWO FAILURES OBSERVED — both open, neither fixed in phase 3
+────────────────────────────────────────────────────────────────────────
+
+6a. ai.classify is ABSENT. Triage returned null. Server log:
+
+  {"level":40,"name":"DeskLine","requestId":"8debc289-...",
+   "userId":"cmt344vlg00061sdiz4zhk5cr","model":"claude-haiku-4-5",
+   "finishReason":"end_turn",
+   "msg":"triage reply was not JSON; ticket ships unclassified"}
+
+  Root cause, reproduced by calling the same prompt directly:
+
+    RAW>>>```json
+    {
+      "priority": "medium",
+      "category": "technical",
+      "sentiment": "neutral"
+    }
+    ```<<<RAW
+    parsed: undefined
+
+  claude-haiku-4-5 wraps the object in a markdown code fence despite the
+  system prompt stating "No prose, no explanation, no markdown code
+  fence." `parsed` is undefined because the Anthropic adapter never sends
+  responseSchema to the provider (F10), so triage.ts falls through to
+  JSON.parse(text.trim()), which fails on the fence.
+
+  The degradation path behaved exactly as designed: the ticket was still
+  created, unclassified, the request still returned 201, and the failure
+  was logged with metadata only. AI is an enhancement, not a gate.
+
+  The same call also confirms F3 on the non-streaming path — Anthropic
+  reported real usage: promptTokens 148, completionTokens 35,
+  costUSD 0.0002584, latencyMs 1053.
+
+6b. audit.auth.signin did NOT reach the table. It appears in the server
+  log under the default sink:
+
+  {"level":30,"name":"aiden:audit","event":"audit.auth.signin",
+   "actorId":"cmt344vlg00061sdiz4zhk5cr",
+   "metadata":{"provider":"credentials"},"msg":"audit.auth.signin"}
+
+  /api/auth/[...nextauth] imports src/lib/auth.ts but not
+  src/lib/security.ts, so the Prisma sink is not registered on the
+  aiden-security instance that route resolves — and instrumentation.ts,
+  which does import the sink, evidently registered it on a different
+  instance. This is direct empirical confirmation of the plan's claim
+  that a sink registered only from instrumentation.ts lands on an
+  instance the handlers never see. The auth route needs the same
+  side-effect import; that belongs to the Audit dimension in phase 4.
+
+════════════════════════════════════════════════════════════════════════
+RUN 2 — after the code-fence fix (same day, same procedure)
+════════════════════════════════════════════════════════════════════════
+
+  Change under test: stripCodeFence() in src/lib/triage.ts unwraps a
+  single enclosing markdown fence before JSON.parse. Zod validation and
+  the degradation to null are unchanged.
+
+  Rebuilt (npm run build, exit 0) and restarted before the run.
+
+7. CREATE — POST /api/tickets  -> HTTP 201
+
+  Request body:
+    subject: "Card declined at checkout after the March billing run"
+    body:    "Three of our customers report their cards were declined at
+              the confirmation step since Monday. The bank says no request
+              reached them. This is costing us orders and I need it looked
+              at today."
+
+  Response:
+    {"ticket":{"id":"cmt388qdz000024di0jwvfdum","orgId":"org_acme",
+     "ownerId":"cmt344vlg00061sdiz4zhk5cr",
+     "status":"open","priority":"urgent","category":"billing",
+     "sentiment":"frustrated",
+     "createdAt":"2026-08-21T17:32:20.760Z",
+     "updatedAt":"2026-08-21T17:32:21.843Z"}}
+
+  Classified. priority/category/sentiment are populated, and the two
+  timestamps differ by ~1.1s — the create landed first, the triage update
+  followed, which is the ordering the plan requires so an AI outage costs
+  the classification and nothing else.
+
+8. audit_logs
+
+       event     | count
+  ---------------+-------
+   ai.classify   |     1
+   ticket.create |     2
+  (2 rows)
+
+   event         | resource_id               | metadata
+  ---------------+---------------------------+-----------------------------------------------------------------------
+   ticket.create | cmt36uqns00003odivw5vso7s | {"orgId": "org_acme", "status": "open"}
+   ticket.create | cmt388qdz000024di0jwvfdum | {"orgId": "org_acme", "status": "open"}
+   ai.classify   | cmt388qdz000024di0jwvfdum | {"model": "claude-haiku-4-5", "orgId": "org_acme", "priority": "urgent"}
+
+  PASS. Both events present, metadata exactly as Dimension 6 specifies,
+  no ticket content anywhere.
+
+9. ai_usage
+
+   route             | provider  | model            | prompt_tokens | completion_tokens | cost_usd | org_id   | user_id
+  -------------------+-----------+------------------+---------------+-------------------+----------+----------+---------------------------
+   POST /api/tickets | anthropic | claude-haiku-4-5 |           247 |                35 | 0.000338 | org_acme | cmt344vlg00061sdiz4zhk5cr
+   POST /api/tickets | anthropic | claude-haiku-4-5 |           263 |                35 | 0.000350 | org_acme | cmt344vlg00061sdiz4zhk5cr
+
+  PASS, and it proves two separate things.
+
+  Real counts: tokens and cost are provider-reported, not estimated —
+  F3 on the non-streaming Anthropic path, confirmed end to end through
+  the app rather than through a probe.
+
+  Correlation works: `route`, `org_id` and `user_id` are all present even
+  though `AIUsageRecord` carries none of them (F5). They came from the
+  app's own requestId → {route, orgId, userId} map in src/lib/ai-usage.ts.
+
+  Note the first row: it is run 1's call, the one whose reply was fenced
+  and failed to parse. The completion still happened and still cost
+  money, so it is still recorded. Usage accounting is about calls issued,
+  not results used.
+
+10. CLEANUP
+
+  Both throwaway tickets were deleted; the seeded dataset is back to 12
+  tickets. The audit_logs and ai_usage rows are kept as evidence — and
+  their survival is itself the point: neither table holds a foreign key
+  to Ticket, exactly so a usage or audit row outlives the row it
+  describes.
+
+  Still open after run 2: item 6b. `audit.auth.signin` continues to go to
+  the default logger sink rather than the table, because
+  /api/auth/[...nextauth] does not import src/lib/security.ts. The fix
+  belongs to phase 4 and must import `@/lib/audit` directly from
+  src/lib/auth.ts — routing it through src/lib/security.ts would be a
+  cycle, since security.ts already imports auth.ts.
