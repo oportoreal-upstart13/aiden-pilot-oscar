@@ -1,0 +1,9 @@
+{
+  "base": "prisma/fragments/_base.prisma",
+  "fragments": [
+    "prisma/fragments/*.prisma",
+    "pkg:@upstart13-com/aiden-db/schema/*.prisma"
+  ],
+  "exclude": ["prisma/migrations/**"],
+  "output": "prisma/schema.prisma"
+}

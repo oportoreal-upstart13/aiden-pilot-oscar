@@ -1,0 +1,11 @@
+// Datasource + generator. Output path is relative to the merged
+// schema file (prisma/schema.prisma), not this fragment.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}

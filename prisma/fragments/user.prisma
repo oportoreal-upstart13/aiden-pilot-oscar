@@ -1,0 +1,20 @@
+// User model — owned by the consumer because Prisma requires it to
+// declare every back-relation it participates in. Add your business
+// back-refs here (e.g. `posts Post[]`, `org Org @relation(...)`).
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  passwordHash  String?   @map("password_hash")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts Account[]
+  sessions Session[]
+  roles    Role[]    @relation("UserRoles")
+
+  @@map("users")
+}

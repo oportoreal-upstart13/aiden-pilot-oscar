@@ -1,0 +1,154 @@
+// ******** AUTO-GENERATED FILE — do not edit. ********
+// Source: composed via `aiden-db-merge-schema` from schema fragments.
+
+// Datasource + generator. Output path is relative to the merged
+// schema file (prisma/schema.prisma), not this fragment.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── prisma/fragments/user.prisma ───
+// User model — owned by the consumer because Prisma requires it to
+// declare every back-relation it participates in. Add your business
+// back-refs here (e.g. `posts Post[]`, `org Org @relation(...)`).
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  passwordHash  String?   @map("password_hash")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts Account[]
+  sessions Session[]
+  roles    Role[]    @relation("UserRoles")
+
+  @@map("users")
+}
+
+// ─── /Users/ramon.marrero/aide-sdk-cli/packages/aiden-db/schema/audit.prisma ───
+// AIDEN — Audit log table.
+//
+// Composed into the consumer's `prisma/schema.prisma` via
+// `aiden-db-merge-schema`. No back-relations are required on the
+// consumer's User model: `actorId` is a denormalized string so that
+// audit rows survive even when the actor's User is deleted.
+//
+// Consumers who want FK enforcement (and `ON DELETE SET NULL` cascade)
+// can add `actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)`
+// to the AuditLog model in their own override fragment AND add the matching
+// back-ref `auditLogs AuditLog[] @relation("AuditActor")` to their User
+// model. The default ships denormalized for portability.
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  event      String
+  actorId    String?  @map("actor_id")
+  resourceId String?  @map("resource_id")
+  metadata   Json?
+  requestId  String?  @map("request_id")
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent") @db.Text
+  timestamp  DateTime @default(now())
+
+  @@index([event])
+  @@index([actorId])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
+
+// ─── /Users/ramon.marrero/aide-sdk-cli/packages/aiden-db/schema/auth.prisma ───
+// AIDEN — NextAuth core tables
+//
+// Composed into the consumer's `prisma/schema.prisma` via `aiden-db-merge-schema`.
+// The consumer must define the `User` model in their own fragment with at minimum:
+//
+//   model User {
+//     id String @id @default(cuid())
+//     // ...your fields...
+//     accounts Account[]
+//     sessions Session[]
+//   }
+//
+// (Account / Session require the User backrefs; Prisma validates this.)
+// See `schema/README.md` in this package for the full integration guide.
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ─── /Users/ramon.marrero/aide-sdk-cli/packages/aiden-db/schema/rbac.prisma ───
+// AIDEN — Roles & permissions (RBAC).
+//
+// Composed into the consumer's `prisma/schema.prisma` via
+// `aiden-db-merge-schema`. The consumer's `User` model MUST declare:
+//
+//   roles Role[] @relation("UserRoles")
+//
+// to satisfy the implicit many-to-many on `Role.users` below. See
+// `schema/README.md` in this package for the full integration guide.
+
+model Role {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  description String?
+  permissions Permission[] @relation("RolePermissions")
+  users       User[]       @relation("UserRoles")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String  @id @default(cuid())
+  key         String  @unique
+  description String?
+  roles       Role[]  @relation("RolePermissions")
+
+  @@map("permissions")
+}
