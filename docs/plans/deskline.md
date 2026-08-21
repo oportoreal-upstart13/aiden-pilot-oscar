@@ -80,6 +80,20 @@ repository's actual state. Pending approval.
 >   that a draft aborted after one token still shows an `ai.draft` row; that
 >   case is distinguishable, because `ai_usage` records what the call actually
 >   consumed and the two tables can be read together.
+> - **D7 · 2026-08-21 · the audit viewer's predicate B is not served by
+>   `audit_logs_actor_id_idx`, contrary to what Dimension 6 claimed.** Found by
+>   measuring rather than assuming, and corrected in place rather than left
+>   standing. Root cause: the query is
+>   `WHERE actor_id IN (…) ORDER BY timestamp DESC, id DESC LIMIT n`, and with
+>   `enable_seqscan off` the planner walks `audit_logs_timestamp_idx` backward —
+>   already in the required order, so it can stop at the limit — and applies the
+>   actor set as a Filter rather than an Index Cond. Predicate A does use its
+>   expression index, as an Index Cond. Nothing is broken and no extra index is
+>   added: the plan's own instruction was not to add one for `actorId`, and
+>   fixing it would need a composite `(actor_id, timestamp)`, not the
+>   single-column index that already ships. The consequence is recorded so it is
+>   not discovered later as a surprise: B's cost grows with the size of the
+>   audit table, not with the caller's organization.
 
 ---
 
@@ -566,10 +580,12 @@ demonstrate the opposite.
 Instead: **two Prisma queries, merged in application code.**
 
 - **A —** `metadata: { path: ["orgId"], equals: activeOrgId }`, served by the
-  expression index from Dimension 3.
-- **B —** `actorId: { in: <user ids of the org's members> }`, served by the
-  shipped `audit_logs_actor_id_idx`. The member ids come from an org-filtered
-  `Membership` query, so this side is still tenant-bound.
+  expression index from Dimension 3. Confirmed by `auto_explain` against the
+  statement the app actually sends: an Index Scan on
+  `audit_logs_metadata_org_id_idx` with the predicate as an **Index Cond**.
+- **B —** `actorId: { in: <user ids of the org's members> }`. The member ids
+  come from an org-filtered `Membership` query, so this side is still
+  tenant-bound. **It is not served by `audit_logs_actor_id_idx`** — see D7.
 
 Results are de-duplicated by `id`, sorted by `timestamp` descending, and
 truncated to the page size. No raw SQL: `createAuditReader` cannot express

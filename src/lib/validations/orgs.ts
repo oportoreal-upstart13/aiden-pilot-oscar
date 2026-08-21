@@ -25,3 +25,16 @@ export const SwitchOrgBody = z.object({
 export const RoleChangeBody = z.object({
   role: z.enum([...ORG_ROLES]),
 });
+
+/**
+ * `GET /api/admin/audit`. Bounded so an admin read cannot be turned into
+ * an unbounded scan of the audit table by query string.
+ */
+export const ListAuditQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+/** `GET /api/admin/usage`. */
+export const ListUsageQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});

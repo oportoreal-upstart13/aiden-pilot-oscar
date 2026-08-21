@@ -1,0 +1,198 @@
+DeskLine — audit index evidence and probe 10
+Date:      2026-08-21
+Migration: 20260821180000_deskline_audit_org_index
+Build:     npm run build (exit 0), npm start -p 3100 (production build)
+
+HOW THIS EXPLAIN WAS TAKEN, AND WHY IT MATTERS
+  Via auto_explain, against the statement Prisma actually sends —
+  parameters and all — not against SQL with the values substituted by
+  hand. Hand-substituted SQL would have proved that the index matches a
+  query the application never issues, which is worth nothing. The
+  parameterised form is the only one that answers the real question,
+  because Prisma binds the JSON path itself as `$1`.
+
+  Enabled for the run, and reverted afterwards (verified: the database
+  has no residual settings):
+
+    ALTER DATABASE deskline_op_dev SET session_preload_libraries = 'auto_explain';
+    ALTER DATABASE deskline_op_dev SET auto_explain.log_min_duration = 0;
+    ALTER DATABASE deskline_op_dev SET auto_explain.log_nested_statements = on;
+
+  auto_explain is not preloaded in the postgres:17 image and cannot be
+  injected into Prisma's own sessions with `LOAD`, so the setting has to
+  be applied at the database level, where new connections pick it up
+  without a server restart.
+
+────────────────────────────────────────────────────────────────────────
+1. THE INDEX
+────────────────────────────────────────────────────────────────────────
+
+  CREATE INDEX "audit_logs_metadata_org_id_idx"
+    ON "audit_logs" ((metadata #> '{orgId}'::text[]));
+
+  As stored by Postgres (pg_indexes.indexdef), i.e. after normalisation:
+
+    CREATE INDEX audit_logs_metadata_org_id_idx ON public.audit_logs
+      USING btree (((metadata #> '{orgId}'::text[])))
+
+  Applied with `prisma migrate deploy`. `prisma migrate status` afterwards
+  reports "Database schema is up to date!" — no drift.
+
+  Indexes on audit_logs after the migration:
+    audit_logs_actor_id_idx        (shipped by the aiden-db fragment)
+    audit_logs_event_idx           (shipped)
+    audit_logs_metadata_org_id_idx (this migration)
+    audit_logs_pkey
+    audit_logs_timestamp_idx       (shipped)
+
+────────────────────────────────────────────────────────────────────────
+2. DEFAULT SETTINGS — the planner prefers a sequential scan
+────────────────────────────────────────────────────────────────────────
+
+  Captured from GET /api/admin/audit as owner@acme.test.
+
+  duration: 0.127 ms  plan:
+  Query Text: SELECT ... FROM "public"."audit_logs"
+    WHERE ("public"."audit_logs"."metadata"#>ARRAY[$1]::text[])::jsonb::jsonb = $2
+    ORDER BY "public"."audit_logs"."timestamp" DESC, "public"."audit_logs"."id" DESC
+    LIMIT $3 OFFSET $4
+  Query Parameters: $1 = 'orgId', $2 = '"org_acme"', $3 = '50', $4 = '0'
+  Limit  (cost=1.11..1.12 rows=1 width=200)
+    ->  Sort  (cost=1.11..1.12 rows=1 width=200)
+          Sort Key: "timestamp" DESC, id DESC
+          ->  Seq Scan on audit_logs  (cost=0.00..1.10 rows=1 width=200)
+                Filter: ((metadata #> '{orgId}'::text[]) = '"org_acme"'::jsonb)
+
+  Stated plainly: at seed scale the planner chooses a sequential scan.
+  The whole table is 12 rows and costs 1.10 to scan; no index can beat
+  that. This is the expected result, not a failure.
+
+  One thing this capture settles that a hand-written EXPLAIN could not.
+  Prisma binds the JSON path as `$1`, and a functional index on a
+  constant path can only match if the planner sees the folded constant.
+  It does: the Filter line reads `'{orgId}'::text[]`, not `$1`. The
+  parameter is substituted at plan time because @prisma/adapter-pg leaves
+  statements unnamed, and Postgres plans unnamed statements at Bind with
+  the actual values. If anyone ever configures `statementNameGenerator`
+  on the adapter, statements become named, gain a plan cache, and from
+  the sixth execution the generic plan would leave `$1` unfolded and this
+  index would silently stop being used.
+
+────────────────────────────────────────────────────────────────────────
+3. WITH enable_seqscan = off — the index is applicable
+────────────────────────────────────────────────────────────────────────
+
+  Condition declared: `ALTER DATABASE deskline_op_dev SET enable_seqscan = off`,
+  server restarted so new connections inherit it. This is the only way to
+  see whether the index *can* serve the predicate at a scale where
+  scanning 12 rows is cheaper than any index.
+
+  Predicate A:
+
+  Limit  (cost=8.16..8.17 rows=1 width=200)
+    ->  Sort  (cost=8.16..8.17 rows=1 width=200)
+          Sort Key: "timestamp" DESC, id DESC
+          ->  Index Scan using audit_logs_metadata_org_id_idx on audit_logs
+                (cost=0.13..8.15 rows=1 width=200)
+                Index Cond: ((metadata #> '{orgId}'::text[]) = '"org_acme"'::jsonb)
+
+  PASS, and note it is an **Index Cond**, not a Filter: the index
+  satisfies the predicate rather than merely being walked. The expression
+  in the index matches the expression the planner derives from Prisma's
+  SQL, which is the entire point of having captured that SQL first.
+
+────────────────────────────────────────────────────────────────────────
+4. FINDING — predicate B does NOT use audit_logs_actor_id_idx
+────────────────────────────────────────────────────────────────────────
+
+  Same run, same conditions:
+
+  Query Text: SELECT ... FROM "public"."audit_logs"
+    WHERE "public"."audit_logs"."actor_id" IN ($1,$2,$3,$4,$5)
+    ORDER BY "public"."audit_logs"."timestamp" DESC, "public"."audit_logs"."id" DESC
+    LIMIT $6 OFFSET $7
+  Limit  (cost=2.57..12.51 rows=5 width=200)
+    ->  Incremental Sort  (cost=2.57..12.51 rows=5 width=200)
+          Sort Key: "timestamp" DESC, id DESC
+          Presorted Key: "timestamp"
+          ->  Index Scan Backward using audit_logs_timestamp_idx on audit_logs
+                (cost=0.13..12.28 rows=5 width=200)
+                Filter: (actor_id = ANY ('{...five member ids...}'::text[]))
+
+  The plan document claimed this side was "served by the shipped
+  audit_logs_actor_id_idx". It is not. The planner walks the *timestamp*
+  index backward — it is already in the order the query asks for, so it
+  can stop at the LIMIT — and applies the actor set as a Filter.
+
+  This is a defensible plan, not a bug, and correctness is unaffected.
+  But it is not what the plan said, so the plan is corrected rather than
+  left standing (deviation D7). The consequence, recorded so it is not a
+  surprise later: predicate B's cost grows with the size of the audit
+  table, not with the caller's organization. Serving it by index would
+  require a composite `(actor_id, timestamp)`; the single-column index
+  that ships cannot satisfy both the filter and the ordering. No index
+  was added, per the phase instruction.
+
+  Reverted after the run:
+    ALTER DATABASE deskline_op_dev RESET enable_seqscan;
+    ALTER DATABASE deskline_op_dev RESET auto_explain.log_min_duration;
+    ALTER DATABASE deskline_op_dev RESET auto_explain.log_nested_statements;
+    ALTER DATABASE deskline_op_dev RESET session_preload_libraries;
+
+  Verified: pg_db_role_setting holds nothing for deskline_op_dev.
+
+────────────────────────────────────────────────────────────────────────
+5. PROBE 10 — the org-scoped viewer does not over-fetch
+────────────────────────────────────────────────────────────────────────
+
+  Made non-vacuous first: signed in as agent1@globex.test and created a
+  Globex ticket (producing auth.signin, ticket.create and ai.classify
+  with metadata.orgId = org_globex), and signed in as
+  consultant@deskline.test, the dual-membership user.
+
+  Full table at the time of the read — 12 rows:
+
+   event                   | email                    | meta_org   | actor_orgs
+  -------------------------+--------------------------+------------+---------------------
+   ticket.create           | agent1@acme.test         | org_acme   | org_acme
+   ticket.create           | agent1@acme.test         | org_acme   | org_acme
+   ai.classify             | agent1@acme.test         | org_acme   | org_acme
+   auth.signin             | agent1@acme.test         |            | org_acme
+   ai.draft                | agent1@acme.test         | org_acme   | org_acme
+   auth.signin             | viewer@acme.test         |            | org_acme
+   security.ability_denied | viewer@acme.test         |            | org_acme
+   auth.signin             | agent1@globex.test       |            | org_globex
+   ticket.create           | agent1@globex.test       | org_globex | org_globex
+   ai.classify             | agent1@globex.test       | org_globex | org_globex
+   auth.signin             | consultant@deskline.test |            | org_acme,org_globex
+   auth.signin             | owner@acme.test          |            | org_acme
+
+  GET /api/admin/audit as owner@acme.test -> HTTP 200, 9 entries.
+
+  Asserted by id, not by reading:
+
+    rows returned                                    : 9
+    ids of actors belonging exclusively to Globex    : 3
+    of those, present in the response                : 0
+    domain events with metadata.orgId != org_acme    : 0
+    PROBE 10: PASS
+
+  The three excluded rows are exactly agent1@globex.test's. The
+  consultant's auth.signin IS returned, and that is the expected result,
+  not a leak in the sense of a bug: it is finding F9. Her row carries no
+  organization at all, so the only handle on it is her actor id, and she
+  is genuinely a member here. The response marks every such row
+  `attribution: "actor"` — six of the nine — against `"org"` for the
+  three domain events that state their organization. The viewer will say
+  so in its own UI rather than presenting actor-attributed rows as if
+  they were org-scoped.
+
+  The response also omits `ipAddress` and `userAgent`, which are on the
+  row. An actor-attributed row may describe activity in another
+  organization, and there is no reason to widen that from "an event
+  happened" to "here is their IP address".
+
+  It does not present `actorRoles` as the explanation for a denial. The
+  security.ability_denied row carries `{"action":"ticket.draft",
+  "actorRoles":["member"]}` — global NextAuth roles, not the org role
+  ("viewer") that actually decided.

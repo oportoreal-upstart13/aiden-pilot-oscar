@@ -136,3 +136,26 @@ export function assertOrgVisible<T extends { id?: string; userId: string }>(
 ): asserts membership is T {
   assertOwnership(membership, userId);
 }
+
+/**
+ * The presence half of the ownership step, for a row that was already
+ * read under an org filter and is **not** the caller's own.
+ *
+ * An owner administering another member's role is the case this exists
+ * for: `assertOwnership` compares `resource.userId` against the caller,
+ * which is exactly the wrong question there — an owner administers other
+ * people's memberships by definition. The tenant boundary is the org
+ * filter in the query; this confirms the filter returned something and
+ * turns "not in your organization" into the same 404 as "does not
+ * exist", with the same body and the same auto-emitted
+ * `security.ownership_failed` event.
+ *
+ * The caller's id is threaded through only so that event names the right
+ * actor.
+ */
+export function assertOrgResourceVisible<T extends { id: string }>(
+  row: T | null | undefined,
+  callerUserId: string
+): asserts row is T {
+  assertOwnership(row && { id: row.id, userId: callerUserId }, callerUserId);
+}
