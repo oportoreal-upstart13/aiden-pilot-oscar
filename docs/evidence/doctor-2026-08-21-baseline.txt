@@ -1,0 +1,51 @@
+npx @upstart13-com/aiden-cli doctor                               
+aiden doctor
+   
+1. aiden.config
+   ✓ D:\repositories\UPSTART13\code\aiden-pilot-oscar\aiden.config.ts valid (v2.0.1)
+
+2. Environment variables
+   ✓ all 3 required vars present
+
+3. CVE scan (osv-scanner)
+   ✗ deepmerge-ts@7.1.5 — GHSA-ggr8-5vv4-36mx (CVSS_V4): DeepmergeTS has stack exhaustion when merging recursive object graphs
+
+4. npm audit (high/critical only)
+   ✓ clean
+
+5. SDK wiring
+   ✓ <ThemeProvider> mounted in root layout
+
+Some checks failed. See above.
+
+PS D:\repositories\UPSTART13\code\aiden-pilot-oscar> npx @upstart13-com/aiden-cli doctor
+aiden doctor
+   
+1. aiden.config
+   ✓ D:\repositories\UPSTART13\code\aiden-pilot-oscar\aiden.config.ts valid (v2.0.1)
+
+2. Environment variables
+   ✓ all 3 required vars present
+
+3. CVE scan (osv-scanner)
+   ! osv-scanner not on PATH — install with `brew install osv-scanner`
+
+4. npm audit (high/critical only)
+   ✓ clean
+
+5. SDK wiring
+   ✓ <ThemeProvider> mounted in root layout
+
+All checks passed.
+
+
+3. CVE scan (osv-scanner)
+   ✓ no vulnerabilities found
+
+4. npm audit (high/critical only)
+   ✓ clean
+
+5. SDK wiring
+   ✓ <ThemeProvider> mounted in root layout
+
+All checks passed.
