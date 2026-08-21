@@ -12,13 +12,54 @@ repository's actual state. Pending approval.
 > reviewers. For a graded attempt this must **predate the first DeskLine feature
 > commit** on `certification`.
 >
-> **UI pre-flight commitment** (to be performed and dated **before the first UI
-> commit**): read `docs/design-system/00-overview.md` and the DS files for the
-> components touched — `01-foundations`, `05-data-display` (tables, badges),
-> `07-feedback` (toasts, streaming states), `08-page-layouts` (PageHeader,
-> detail layout). The `/frontend-design` skill mandated by `CLAUDE.md` **is not
-> shipped in this installation** (F4); the DS files are the pre-flight source
-> and the gap is recorded as a fix entry.
+> **UI pre-flight — PERFORMED 2026-08-21, before any `.tsx` in this repository
+> was created or modified.** This commit contains only this record; the
+> timestamp is the evidence that the reading preceded the work.
+>
+> `CLAUDE.md` mandates invoking the `/frontend-design` skill before any UI. It
+> **is not shipped in this installation** (F4) — `.claude/commands/` holds six
+> commands and none is it, there is no `.claude/skills/`, and nothing at user
+> or plugin level provides it. The design-system files are therefore the
+> substitute source, read in full rather than skimmed.
+>
+> **Files read, and why each:**
+>
+> | File                  | Why it was needed for this phase                                                                                       |
+> | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+> | `00-overview.md`      | Mandatory for every UI task — golden rules, anti-patterns, token discipline, where UI code lives                       |
+> | `01-foundations.md`   | Colour tokens, type scale, 4px spacing, the radius table, icon rules (`size-4`, `strokeWidth={1.5}`)                   |
+> | `02-components.md`    | Buttons, Cards, **Badge semantic variants** (ticket status/priority, audit attribution), DropdownMenu (org switcher, row actions), Tabs |
+> | `03-forms.md`         | The create-ticket form (`react-hook-form` + `zodResolver`) and the role `Select` on the members page                   |
+> | `04-dialogs.md`       | The create-ticket dialog — anatomy, sizing, controlled open state, reset-on-close                                      |
+> | `05-data-display.md`  | Four of the five pages are tables — table chrome, metric cards for the cost page, empty states, `tabular-nums`         |
+> | `06-navigation.md`    | Where the org switcher can live, `PageHeader`'s exact contract, and how the dashboard layout gates admin nav           |
+> | `07-feedback.md`      | Skeletons for every list, toasts after mutations, error states, and the streaming states of the draft panel            |
+> | `08-page-layouts.md`  | Page scaffolding (`px-6 py-8 space-y-8`), the detail-page pattern with breadcrumb, page-layout rules                   |
+>
+> Eight of the nine, not the four originally anticipated. The phase ships a
+> dialog, two forms, a dropdown and a header-level control, so `02`, `03`, `04`
+> and `06` are load-bearing here and reading only the anticipated four would
+> have been a pre-flight in name. `MIGRATION.md` is not relevant.
+>
+> **Three conflicts/gaps found by reading, raised before writing any UI:**
+>
+> 1. **Dialog radius is specified twice, differently, and both cite Figma.**
+>    `01-foundations` says `rounded-2xl` (16px) — "Modals (matches Figma dialog
+>    corners)" — and `CLAUDE.md` agrees. `04-dialogs` says `rounded-lg` (8px) —
+>    "per shadcn default — matches Figma" — and lists overriding the dialog
+>    radius under **Don't**. `00-overview`'s radius rule omits modals entirely.
+>    A binary rule cannot have two values; resolved before the dialog is built.
+> 2. **There is no header slot for the org switcher.** The layout is a
+>    package-owned `DashboardNav` sidebar plus a mobile-only `DashboardHeader`;
+>    neither accepts `children` or any content slot, and `08-page-layouts`
+>    forbids putting anything above `PageHeader`. Per `CLAUDE.md` a missing
+>    primitive belongs upstream rather than being forked locally.
+> 3. **Admin nav gating is specified against a global ability.**
+>    `06-navigation` builds the secondary nav from
+>    `abilities.can(session, "users.manage")`. DeskLine's admin surface is
+>    org-scoped, so the gate is `org.members.read` with the active membership as
+>    the resource — which means the dashboard layout has to resolve the active
+>    organization to build its nav.
 >
 > **Deviation log** — every deviation surfaced during the build, with a date and
 > root cause. None is silently absorbed.
