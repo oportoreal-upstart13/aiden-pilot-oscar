@@ -20,9 +20,34 @@ repository's actual state. Pending approval.
 > shipped in this installation** (F4); the DS files are the pre-flight source
 > and the gap is recorded as a fix entry.
 >
-> **Deviation log:** _(empty at approval time — every deviation surfaced during
-> the build is appended here with a date and root cause; none is silently
-> absorbed)_
+> **Deviation log** — every deviation surfaced during the build, with a date and
+> root cause. None is silently absorbed.
+>
+> - **D1 · 2026-08-21 · `src/lib/validations/orgs.ts` added, outside the
+>   Dimension 7 file list.** Root cause: the route table names `SwitchOrgBody`
+>   and `RoleChangeBody`, but Dimension 7 listed only
+>   `src/lib/validations/tickets.ts`. Both schemas are org-scoped, not
+>   ticket-scoped; housing them in a file named `tickets.ts` would have made the
+>   filename lie about its contents. One new file, no new surface — the schemas
+>   were always going to exist.
+> - **D2 · 2026-08-21 · `parseQuery` moved from
+>   `src/lib/validations/tickets.ts` (where Dimension 5 placed it) to
+>   `src/lib/security.ts`.** Root cause: `parseQuery` must throw
+>   `RequestValidationError`, which pulls `aiden-security` and, transitively,
+>   `aiden-logging` (pino) into whatever imports it. Leaving it beside the
+>   schemas would have made every schema module server-only, so the phase 4
+>   create-ticket form could not have reused `CreateTicketBody` with
+>   `zodResolver` without a file split later. Moving it puts `parseQuery` next
+>   to the `parseRequest` re-export it mirrors and keeps `src/lib/validations/*`
+>   pure Zod.
+> - **D3 · 2026-08-21 · the ticket list is narrowed by `ownerId` for agents;
+>   Dimensions 2 and 4 amended to match.** Root cause: Dimension 2 promised any
+>   member a dashboard listing the tickets of their active organization, while
+>   the route table applied the ownership step to `GET /api/tickets/[id]` — and
+>   that step is a real ownership check for agents. An agent would therefore
+>   have seen a colleague's ticket in the list and received a 404 opening it.
+>   The list and the detail must agree; `orgTicketsWhere` now takes the active
+>   membership and applies the same boundary the detail read enforces.
 
 ---
 
@@ -91,8 +116,11 @@ this attempt is written against this plan and verified against it.
 User-visible behaviour per persona. No implementation detail.
 
 - **Any authenticated member** signs in with credential auth (`LoginForm` /
-  `RegisterForm` from `aiden-auth`) and lands on a dashboard listing **only the
-  tickets of their active organization**, with status and priority.
+  `RegisterForm` from `aiden-auth`) and lands on a dashboard scoped to their
+  active organization, with status and priority. **Owners and viewers see every
+  ticket in the organization; agents see the tickets they own.** The list and
+  the detail read apply the same boundary, so a row that appears in the list
+  always opens (D3).
 - **A user who belongs to more than one organization** sees an org switcher in
   the header. Switching changes everything they see — tickets, members, audit
   trail, cost. They can never select an organization they do not belong to, and
@@ -240,7 +268,7 @@ ability resource and the predicate decides on its `role`.
 
 | Route group                         | Primitive                                                  | Rationale                                                                                                          |
 | ----------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Ticket read (list/get)              | query-level org filter; ownership step narrows agents only | Ownership is the natural boundary for an agent; org-wide read for owner and viewer is a role fact, not a predicate |
+| Ticket read (list/get)              | org filter, plus an `ownerId` filter for agents; ownership step | Ownership is the natural boundary for an agent, applied identically in the list and the detail read so the two cannot disagree (D3); org-wide read for owner and viewer is a role fact, not a predicate |
 | Ticket mutate (create/update/close) | ownership step + `assertCan`                               | Both needed: the row must be theirs (404) **and** the role must permit mutation (403)                              |
 | AI actions (draft/classify)         | `assertCan` after ownership                                | AI is a privileged action on an owned row                                                                          |
 | `/admin/*`                          | `assertCan` (owner only)                                   | A pure role gate; no ownership predicate applies                                                                   |
@@ -411,9 +439,11 @@ minimum surface multi-org needs, and both run the full perimeter, so they add
 evidence rather than scope.
 
 **Query-string validation:** `parseRequest` validates bodies, not search params.
-`parseQuery(req, schema)` is added in `src/lib/validations/tickets.ts`, throwing
-the same `RequestValidationError` and producing the same 400. No route reads
-`searchParams` unvalidated.
+`parseQuery(req, schema)` is added in `src/lib/security.ts`, beside the
+`parseRequest` re-export it mirrors, throwing the same `RequestValidationError`
+and producing the same 400. It lives there rather than beside the schemas so
+`src/lib/validations/*` stays pure Zod and remains importable from a client
+form (D2). No route reads `searchParams` unvalidated.
 
 **Hardening:** `src/proxy.ts` is **created** — the app serves no security
 headers today (F11). `securityHeaders` is imported from
@@ -619,12 +649,13 @@ commit **after** plan approval; feature work follows in phases.
 | `src/lib/org.ts`                                                        | new — active organization resolution, `assertOrgVisible`                                                                                                             |
 | `src/lib/tickets.ts`                                                    | new — `orgTicketsWhere`, `assertTicketOwnership` (F6), shared by routes and pages                                                                                    |
 | `src/lib/routes.ts`                                                     | new — `RouteParams` and the single typed adapter for Next's required handler context                                                                                 |
-| `src/lib/validations/tickets.ts`                                        | new — named Zod schemas + `parseQuery`                                                                                                                               |
+| `src/lib/validations/tickets.ts`                                        | new — ticket Zod schemas, pure Zod so a client form can reuse them (D2)                                                                                              |
+| `src/lib/validations/orgs.ts`                                           | new — `SwitchOrgBody`, `RoleChangeBody` (D1)                                                                                                                         |
 | `src/lib/ai-prompts.ts`                                                 | new — prompts, content fencing, triage Zod contract + JSON Schema mirror                                                                                             |
 | `src/lib/ai-usage.ts`                                                   | new — `setAIUsageSink` → `AIUsage`, plus the `requestId → {route, orgId}` map                                                                                        |
 | `src/lib/triage.ts`                                                     | new — structured output, Zod-validated, explicit degradation                                                                                                         |
 | `src/lib/audit.ts` / `src/lib/audit-sinks.ts`                           | edit / new — sink selection and file implementation                                                                                                                  |
-| `src/lib/security.ts`                                                   | edit — `configureSecurity` once; imports the sink registration                                                                                                       |
+| `src/lib/security.ts`                                                   | edit — `configureSecurity` once; `parseQuery` (D2); imports the sink registration                                                                                    |
 | `src/app/api/tickets/**`                                                | new — four perimeter routes                                                                                                                                          |
 | `src/app/api/orgs/{route.ts,switch/route.ts}`                           | new                                                                                                                                                                  |
 | `src/app/api/admin/audit/route.ts`                                      | **rewrite** — currently leaks cross-tenant audit rows (F8)                                                                                                           |
