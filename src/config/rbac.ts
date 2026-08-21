@@ -33,3 +33,24 @@ export type PermissionKey = (typeof PERMISSIONS)[number]["key"];
 
 /** A role name, e.g. `"admin"`. */
 export type RoleName = (typeof ROLES)[number]["name"];
+
+// ─── DeskLine org-scoped roles ───────────────────────────────────────────
+//
+// These are stored in `Membership.role`, NOT in the global `Role` table
+// above. The two are different authorities and must not be conflated: the
+// `{ roles: [...] }` ability shorthand intersects `session.user.roles`
+// (NextAuth's global roles), while DeskLine's roles are per-organization
+// and differ per organization for the same user. Every org-scoped ability
+// is therefore a predicate over the active membership, never the shorthand.
+
+/** Org-scoped role names stored in `Membership.role`. */
+export const ORG_ROLES = ["owner", "agent", "viewer"] as const;
+
+/** An org-scoped role, e.g. `"agent"`. */
+export type OrgRole = (typeof ORG_ROLES)[number];
+
+/** Ticket lifecycle values stored in `Ticket.status`. */
+export const TICKET_STATUSES = ["open", "pending", "closed"] as const;
+
+/** A ticket status, e.g. `"open"`. */
+export type TicketStatus = (typeof TICKET_STATUSES)[number];

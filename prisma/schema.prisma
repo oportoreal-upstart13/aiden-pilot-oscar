@@ -13,7 +13,124 @@ datasource db {
   provider = "postgresql"
 }
 
-// ─── prisma/fragments/user.prisma ───
+// ─── prisma\fragments\aiusage.prisma ───
+// AIUsage — one row per AI call, written by the `setAIUsageSink` registered
+// in `src/lib/ai-usage.ts`.
+//
+// `orgId`, `userId` and `route` are denormalized Strings with no foreign
+// key, deliberately. The SDK's `AIUsageRecord` carries neither `orgId` nor
+// `route` (plan finding F5) — the app correlates them by `requestId` through
+// its own map — and a usage row must outlive the user or organization it
+// describes, the same reasoning `aiden-db` applies to `AuditLog.actorId`.
+//
+// `provider` is added beyond the spec so cost can be compared across
+// providers after the live switch, which is graded.
+//
+// `costUsd` comes back from the driver adapter as `Prisma.Decimal`; every
+// route serialising it converts explicitly (`Number(row.costUsd)`), because
+// a raw Decimal does not round-trip through `NextResponse.json()`.
+
+model AIUsage {
+  id               String   @id @default(cuid())
+  orgId            String   @map("org_id")
+  userId           String   @map("user_id")
+  route            String
+  provider         String
+  model            String
+  promptTokens     Int      @map("prompt_tokens")
+  completionTokens Int      @map("completion_tokens")
+  costUsd          Decimal  @map("cost_usd") @db.Decimal(10, 6)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([orgId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("ai_usage")
+}
+
+// ─── prisma\fragments\membership.prisma ───
+// Membership — the join between a User and an Org, carrying the org-scoped
+// role.
+//
+// This table is the authority on which organizations a caller may see. The
+// `deskline_org` cookie is untrusted input; forging it towards another
+// organization returns no Membership row and therefore grants nothing.
+//
+// `role` is a String rather than a Prisma enum because `src/config/rbac.ts`
+// is the single source of truth for role names, shared with `prisma/seed.ts`
+// and with the ability predicates. Org roles live here, never in the global
+// `Role` table — the `{ roles: [...] }` ability shorthand reads NextAuth's
+// global roles, not this column (plan finding F7).
+
+model Membership {
+  id        String   @id @default(cuid())
+  orgId     String   @map("org_id")
+  userId    String   @map("user_id")
+  role      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([userId])
+  @@index([orgId])
+  @@map("memberships")
+}
+
+// ─── prisma\fragments\org.prisma ───
+// Org — the tenant boundary. Every DeskLine row that belongs to a customer
+// hangs off an Org, and every read is filtered by it (`where: { orgId }`)
+// before the ownership step ever runs. See the plan's Request perimeter
+// dimension, step one of two-step tenant scoping.
+
+model Org {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  memberships Membership[]
+  tickets     Ticket[]
+
+  @@map("orgs")
+}
+
+// ─── prisma\fragments\ticket.prisma ───
+// Ticket — the unit of work. `ownerId` keeps the spec's frozen field name
+// even though `assertOwnership` compares a literal `userId` (plan finding
+// F6); the adaptation lives in one helper, `assertTicketOwnership` in
+// `src/lib/tickets.ts`, and nowhere else.
+//
+// `priority`, `category` and `sentiment` are nullable because AI triage
+// fills them and AI is an enhancement, never a gate: when the provider is
+// unavailable the ticket is still created, unclassified.
+//
+// The composite `@@index([orgId, status])` serves the tenant-scoped list
+// query, which always filters by org and usually by status.
+
+model Ticket {
+  id        String   @id @default(cuid())
+  orgId     String   @map("org_id")
+  ownerId   String   @map("owner_id")
+  subject   String
+  body      String
+  status    String   @default("open")
+  priority  String?
+  category  String?
+  sentiment String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  org   Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  owner User @relation("TicketOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([ownerId])
+  @@index([orgId, status])
+  @@map("tickets")
+}
+
+// ─── prisma\fragments\user.prisma ───
 // User model — owned by the consumer because Prisma requires it to
 // declare every back-relation it participates in. Add your business
 // back-refs here (e.g. `posts Post[]`, `org Org @relation(...)`).
@@ -32,10 +149,16 @@ model User {
   sessions Session[]
   roles    Role[]    @relation("UserRoles")
 
+  // DeskLine back-relations. `tickets` is named because Ticket.owner
+  // declares @relation("TicketOwner"); AIUsage is deliberately absent —
+  // it is denormalized and holds no foreign key (see aiusage.prisma).
+  memberships Membership[]
+  tickets     Ticket[]     @relation("TicketOwner")
+
   @@map("users")
 }
 
-// ─── /Users/ramon.marrero/aide-sdk-cli/packages/aiden-db/schema/audit.prisma ───
+// ─── node_modules\@upstart13-com\aiden-db\schema\audit.prisma ───
 // AIDEN — Audit log table.
 //
 // Composed into the consumer's `prisma/schema.prisma` via
@@ -66,7 +189,7 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-// ─── /Users/ramon.marrero/aide-sdk-cli/packages/aiden-db/schema/auth.prisma ───
+// ─── node_modules\@upstart13-com\aiden-db\schema\auth.prisma ───
 // AIDEN — NextAuth core tables
 //
 // Composed into the consumer's `prisma/schema.prisma` via `aiden-db-merge-schema`.
@@ -122,7 +245,7 @@ model VerificationToken {
   @@map("verification_tokens")
 }
 
-// ─── /Users/ramon.marrero/aide-sdk-cli/packages/aiden-db/schema/rbac.prisma ───
+// ─── node_modules\@upstart13-com\aiden-db\schema\rbac.prisma ───
 // AIDEN — Roles & permissions (RBAC).
 //
 // Composed into the consumer's `prisma/schema.prisma` via

@@ -16,5 +16,11 @@ model User {
   sessions Session[]
   roles    Role[]    @relation("UserRoles")
 
+  // DeskLine back-relations. `tickets` is named because Ticket.owner
+  // declares @relation("TicketOwner"); AIUsage is deliberately absent —
+  // it is denormalized and holds no foreign key (see aiusage.prisma).
+  memberships Membership[]
+  tickets     Ticket[]     @relation("TicketOwner")
+
   @@map("users")
 }

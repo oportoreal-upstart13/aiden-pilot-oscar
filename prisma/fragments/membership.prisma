@@ -1,0 +1,28 @@
+// Membership — the join between a User and an Org, carrying the org-scoped
+// role.
+//
+// This table is the authority on which organizations a caller may see. The
+// `deskline_org` cookie is untrusted input; forging it towards another
+// organization returns no Membership row and therefore grants nothing.
+//
+// `role` is a String rather than a Prisma enum because `src/config/rbac.ts`
+// is the single source of truth for role names, shared with `prisma/seed.ts`
+// and with the ability predicates. Org roles live here, never in the global
+// `Role` table — the `{ roles: [...] }` ability shorthand reads NextAuth's
+// global roles, not this column (plan finding F7).
+
+model Membership {
+  id        String   @id @default(cuid())
+  orgId     String   @map("org_id")
+  userId    String   @map("user_id")
+  role      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([userId])
+  @@index([orgId])
+  @@map("memberships")
+}

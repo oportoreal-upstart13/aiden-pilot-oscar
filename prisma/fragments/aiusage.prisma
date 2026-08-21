@@ -1,0 +1,33 @@
+// AIUsage — one row per AI call, written by the `setAIUsageSink` registered
+// in `src/lib/ai-usage.ts`.
+//
+// `orgId`, `userId` and `route` are denormalized Strings with no foreign
+// key, deliberately. The SDK's `AIUsageRecord` carries neither `orgId` nor
+// `route` (plan finding F5) — the app correlates them by `requestId` through
+// its own map — and a usage row must outlive the user or organization it
+// describes, the same reasoning `aiden-db` applies to `AuditLog.actorId`.
+//
+// `provider` is added beyond the spec so cost can be compared across
+// providers after the live switch, which is graded.
+//
+// `costUsd` comes back from the driver adapter as `Prisma.Decimal`; every
+// route serialising it converts explicitly (`Number(row.costUsd)`), because
+// a raw Decimal does not round-trip through `NextResponse.json()`.
+
+model AIUsage {
+  id               String   @id @default(cuid())
+  orgId            String   @map("org_id")
+  userId           String   @map("user_id")
+  route            String
+  provider         String
+  model            String
+  promptTokens     Int      @map("prompt_tokens")
+  completionTokens Int      @map("completion_tokens")
+  costUsd          Decimal  @map("cost_usd") @db.Decimal(10, 6)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([orgId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("ai_usage")
+}

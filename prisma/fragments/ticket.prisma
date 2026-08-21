@@ -1,0 +1,33 @@
+// Ticket — the unit of work. `ownerId` keeps the spec's frozen field name
+// even though `assertOwnership` compares a literal `userId` (plan finding
+// F6); the adaptation lives in one helper, `assertTicketOwnership` in
+// `src/lib/tickets.ts`, and nowhere else.
+//
+// `priority`, `category` and `sentiment` are nullable because AI triage
+// fills them and AI is an enhancement, never a gate: when the provider is
+// unavailable the ticket is still created, unclassified.
+//
+// The composite `@@index([orgId, status])` serves the tenant-scoped list
+// query, which always filters by org and usually by status.
+
+model Ticket {
+  id        String   @id @default(cuid())
+  orgId     String   @map("org_id")
+  ownerId   String   @map("owner_id")
+  subject   String
+  body      String
+  status    String   @default("open")
+  priority  String?
+  category  String?
+  sentiment String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  org   Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  owner User @relation("TicketOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([ownerId])
+  @@index([orgId, status])
+  @@map("tickets")
+}

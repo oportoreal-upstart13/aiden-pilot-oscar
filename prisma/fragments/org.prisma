@@ -1,0 +1,15 @@
+// Org — the tenant boundary. Every DeskLine row that belongs to a customer
+// hangs off an Org, and every read is filtered by it (`where: { orgId }`)
+// before the ownership step ever runs. See the plan's Request perimeter
+// dimension, step one of two-step tenant scoping.
+
+model Org {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  memberships Membership[]
+  tickets     Ticket[]
+
+  @@map("orgs")
+}
