@@ -135,6 +135,51 @@ repository's actual state. Pending approval.
 >   single-column index that already ships. The consequence is recorded so it is
 >   not discovered later as a surprise: B's cost grows with the size of the
 >   audit table, not with the caller's organization.
+> - **D8 · 2026-08-21 · four UI files outside the Dimension 7 list, all forced
+>   by the same gap.** `src/components/app-shell.tsx` (new),
+>   `src/app/admin/layout.tsx` (rewrite), `src/app/dashboard/layout.tsx`
+>   (rewrite) and `src/components/members/members-table.tsx` (new). Root cause:
+>   the plan named the admin *pages* but not the chrome around them, and the
+>   shipped `/admin` layout rendered no navigation and gated on the **global**
+>   `users.manage` / `audit.read` — so every DeskLine owner was redirected away
+>   from their own organization's administration, and any admin page would have
+>   rendered with no sidebar and no org switcher. The layout guard is now
+>   coarse ("administers something") with each page keeping its exact check,
+>   because two unrelated authorities live under `/admin`: DeskLine's
+>   org-scoped pages and the starter's cross-tenant `/admin/users`. The shell
+>   is shared rather than duplicated across the two layouts, and it is where
+>   the organization bar lives, since neither `DashboardNav` nor
+>   `DashboardHeader` accepts a content slot. `members-table.tsx` sits in
+>   `src/components/members/` rather than `src/components/tickets/*` because it
+>   is not a ticket component.
+> - **D9 · 2026-08-21 · `<Toaster />` moved from the dashboard layout to the
+>   root layout.** Dimension 7 lists `src/app/layout.tsx` as "verify —
+>   ThemeProvider at root, globals.css, Toaster at root"; the verification
+>   found `Toaster` was **not** at root, only inside the dashboard layout, so a
+>   toast fired from any surface outside that segment would have gone nowhere.
+>   `07-feedback.md` says to mount it once in the root layout. Fixed rather
+>   than recorded as compliant.
+> - **D10 · 2026-08-21 · a last-owner guard added to
+>   `PATCH /api/admin/members/[id]`, returning 409.** Not in any dimension of
+>   the plan; found while building the members UI. Root cause: the route
+>   happily let the only owner of an organization demote themselves, which
+>   leaves nobody able to manage members, change roles or read the audit trail —
+>   and nobody able to undo it, because undoing it is itself an owner-only
+>   action. The starter's own role route already sets the precedent with its
+>   `last_admin` 409, so this is consistency with an established pattern rather
+>   than a new idea. The check is on the outcome, not on who is acting, so it
+>   also stops an owner demoting the only other owner. The UI surfaces the
+>   server's reason instead of a generic failure, because the fix — promote
+>   someone else first — is actionable.
+> - **D11 · 2026-08-21 · `eslint.config.mjs` gained a `no-restricted-syntax`
+>   rule banning non-token colour utilities and inline `style` attributes.**
+>   A file outside every dimension's list. Root cause: `.claude/fixes/ui.md`
+>   carried a `[STRUCTURALLY PREVENTED]` marker asserting this rule existed, and
+>   it did not — the config was `nextVitals` + `nextTs` + `globalIgnores`, so
+>   `npm run lint` passed on `bg-gray-500`. "Never hardcode colors" is golden
+>   rule 1 of the design system and is graded as binary, so leaving it enforced
+>   by review alone while a fix entry claimed otherwise was the worst of both.
+>   Verified by probe before the claim was restored.
 
 ---
 
@@ -784,6 +829,28 @@ is a second AI surface, and the spec caps scope at one SSE feature plus one
 structured-output use. Only `src/app/dashboard/chat/page.tsx` references the
 chat route and it is deleted in the same commit; nothing references the
 impersonation route. `src/config/nav.ts` is checked at deletion time.
+
+**Page-header coverage.** DeskLine ships **five** pages, and every one carries
+the canonical header:
+
+| Page                            | Header                                                |
+| ------------------------------- | ------------------------------------------------------- |
+| `/dashboard`                    | `PageHeader` — action slot holds the one primary CTA  |
+| `/dashboard/tickets/[id]`       | inlined wrapper, same `border-b border-border px-6 py-5` contract |
+| `/admin/members`                | `PageHeader`                                          |
+| `/admin/audit`                  | `PageHeader`                                          |
+| `/admin/cost`                   | `PageHeader`                                          |
+
+The detail page is the one that does not import `PageHeader`, and that is
+`08-page-layouts.md`'s own instruction, not a lapse: a detail page needs a
+breadcrumb above the title, `PageHeader` has no breadcrumb slot, and the doc
+says to inline the wrapper in exactly this case while matching its contract. A
+grep for `PageHeader` therefore finds four DeskLine pages, not five.
+
+Pages without a page header are all the starter's and out of scope: the auth
+pages (`08-page-layouts.md` specifies centred cards with no header), the
+marketing page, and the settings sub-pages, whose header lives in
+`src/app/dashboard/settings/layout.tsx`.
 
 ---
 

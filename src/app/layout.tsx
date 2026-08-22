@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@upstart13-com/aiden-ui/layout/theme-provider";
+import { Toaster } from "@upstart13-com/aiden-ui";
 import { aidenConfig } from "@/../aiden.config";
 import { brand } from "@/config/brand";
 import "@/lib/styles.css";
@@ -35,7 +36,13 @@ export default function RootLayout({
       className={`${interSans.variable} ${jetbrainsMono.variable}`}
     >
       <body className="bg-background text-foreground antialiased">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {children}
+          {/* Mounted once at the root, per 07-feedback. It was previously
+              only inside the dashboard layout, so any toast fired from a
+              surface outside that segment would have gone nowhere. */}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );

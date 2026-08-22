@@ -6,12 +6,20 @@
 | ---------------- | --------------------- | ------- | ---------------------- | ------------ | ------ |
 | TypeScript/Build | `typescript-build.md` | 3       | 2 of 3                 | 2026-02-20   | Stable |
 | Next.js          | `nextjs.md`           | 3       | 0 of 3                 | 2026-02-20   | Stable |
-| UI/Frontend      | `ui.md`               | 5       | 2 of 5                 | 2026-02-20   | Stable |
+| UI/Frontend      | `ui.md`               | 9       | 2 of 9                 | 2026-08-21   | Growing |
 | Prisma           | `prisma.md`           | 3       | 1 of 3                 | 2026-03-09   | Stable |
 | AIDEN Security   | `aiden-security.md`   | 1       | 1 of 1                 | 2026-08-21   | New    |
 | AIDEN AI         | `aiden-ai.md`         | 2       | 2 of 2                 | 2026-08-21   | New    |
 
-**Total: 17 active entries across 6 categories · 8 structurally prevented**
+**Total: 21 active entries across 6 categories · 8 structurally prevented**
+
+> On 2026-08-21 the hardcoded-colour entry in `ui.md` was found to be claiming
+> `[STRUCTURALLY PREVENTED]` by an ESLint rule that did not exist in this
+> repository's `eslint.config.mjs`. It was first downgraded to an honest gap —
+> briefly taking the prevented count down — and then the gap was closed by
+> writing the rule for real and proving it fails the build on `bg-gray-500`.
+> The marker is back, and now true. That is what `ui.md` crossing this index's
+> 5-entry threshold was supposed to trigger.
 
 These entries ship with the AIDEN starter template — they are universal gotchas observed across customer apps (Tailwind v4, Prisma 7, Next.js App Router, TypeScript). Add your own as they come up.
 

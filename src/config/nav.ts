@@ -1,21 +1,24 @@
 import type { DashboardNavItem } from "@upstart13-com/aiden-ui";
 
 /**
- * Source of truth for the dashboard sidebar navigation. Imported by
- * the layout, which decides at render-time whether the user can see
- * each item (e.g. the Admin → Users entry is gated by `users.manage`).
+ * Source of truth for the dashboard sidebar navigation. Imported by the
+ * app shell, which decides at render time which items the caller may see.
  *
- * Icon names are resolved against `defaultNavIconRegistry` from
- * `@upstart13-com/aiden-ui` at render time. Pass a custom registry to
- * `DashboardNav`/`MobileNav`/`DashboardHeader` to register additional
- * icons; see `@upstart13-com/aiden-ui/layout/nav-icons`.
+ * Two different gates live downstream of this file and must not be
+ * conflated. `adminUsersNavItem` points at the starter's **global** user
+ * administration and stays gated on the global `users.manage` ability.
+ * `deskLineAdminNavItems` point at DeskLine's **org-scoped** admin, gated
+ * on the active membership's role via an `AbilityPredicate`.
+ *
+ * Icon names resolve against `defaultNavIconRegistry` at render time; all
+ * names used here are in the default set, so no custom registry is needed.
  */
 
 export const primaryNavItems: DashboardNavItem[] = [
   {
     href: "/dashboard",
-    label: "Overview",
-    icon: "LayoutDashboard",
+    label: "Tickets",
+    icon: "Inbox",
     exact: true,
   },
 ];
@@ -27,9 +30,17 @@ export const settingsNavItem: DashboardNavItem = {
   exact: false,
 };
 
+/** Starter global user administration — gated on `users.manage`. */
 export const adminUsersNavItem: DashboardNavItem = {
   href: "/admin/users",
   label: "Users",
   icon: "Users",
   exact: false,
 };
+
+/** DeskLine org administration — gated on the active membership's role. */
+export const deskLineAdminNavItems: DashboardNavItem[] = [
+  { href: "/admin/members", label: "Members", icon: "Users", exact: false },
+  { href: "/admin/audit", label: "Audit", icon: "Shield", exact: false },
+  { href: "/admin/cost", label: "AI spend", icon: "Receipt", exact: false },
+];

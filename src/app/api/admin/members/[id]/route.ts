@@ -33,6 +33,29 @@ export const PATCH = withAuthIdRoute(async (req, { session, params }) => {
 
   const fromRole = target.role;
 
+  // Last-owner guard, following the `last_admin` precedent in the
+  // starter's role route. Demoting the final owner would leave the
+  // organization with nobody able to manage members, change roles, or
+  // read its audit trail — and nobody able to undo it, because undoing it
+  // is itself an owner-only action. An owner demoting themselves is the
+  // likely way to hit this, but the check is on the outcome, not on who
+  // is acting, so it also covers an owner demoting the only other one.
+  if (fromRole === "owner" && role !== "owner") {
+    const owners = await prisma.membership.count({
+      where: { orgId: membership.orgId, role: "owner" },
+    });
+    if (owners <= 1) {
+      return NextResponse.json(
+        {
+          error:
+            "This is the organization's only owner. Promote someone else to owner first.",
+          code: "last_owner",
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const updated = await prisma.membership.update({
     where: { id: target.id },
     data: { role },

@@ -1,0 +1,102 @@
+DeskLine — last-owner guard on PATCH /api/admin/members/[id]
+Date:  2026-08-21
+Build: npm run build (exit 0), npm start -p 3100 (production build)
+Route: PATCH /api/admin/members/[id]  ->  409 { code: "last_owner" }
+
+WHY THE GUARD EXISTS
+  Without it, the only owner of an organization could demote themselves,
+  leaving nobody able to manage members, change roles, or read the audit
+  trail — and nobody able to undo it, because undoing it is itself an
+  owner-only action. The starter's own role route already sets the
+  precedent with its `last_admin` 409.
+
+  The check is written on the **outcome**, not on who is acting: it fires
+  whenever the change would take the organization's owner count to zero.
+  That covers an owner demoting themselves and an owner demoting the only
+  other owner, and it does not fire when a second owner exists.
+
+────────────────────────────────────────────────────────────────────────
+STARTING STATE — org_acme has exactly one owner
+────────────────────────────────────────────────────────────────────────
+
+  cmt345188000f1sditmov2b40 | agent1@acme.test         | agent
+  cmt34518f000g1sdifb4m79gz | agent2@acme.test         | agent
+  cmt3451a1000m1sdi7i1kksn6 | consultant@deskline.test | agent
+  cmt34517w000e1sdil7tuqk8s | owner@acme.test          | owner
+  cmt34518r000h1sdihnoa6t8g | viewer@acme.test         | viewer
+
+  Signed in as owner@acme.test (302).
+
+────────────────────────────────────────────────────────────────────────
+A. The only owner tries to demote themselves  ->  409
+────────────────────────────────────────────────────────────────────────
+
+  PATCH /api/admin/members/cmt34517w000e1sdil7tuqk8s  {"role":"agent"}
+
+  HTTP 409
+  {"error":"This is the organization's only owner. Promote someone else to
+   owner first.","code":"last_owner"}
+
+  PASS. The message names the fix, which is what makes it actionable: the
+  UI surfaces the server's own text rather than a generic failure.
+
+────────────────────────────────────────────────────────────────────────
+B. Control — the route still works  ->  200
+────────────────────────────────────────────────────────────────────────
+
+  PATCH /api/admin/members/cmt34518f000g1sdifb4m79gz  {"role":"owner"}
+
+  HTTP 200
+  {"member":{"membershipId":"cmt34518f000g1sdifb4m79gz",
+   "userId":"cmt344wf900071sdis4sakpmo","name":"Chen Wu",
+   "email":"agent2@acme.test","role":"owner"}}
+
+  org_acme now has two owners.
+
+────────────────────────────────────────────────────────────────────────
+C. The same self-demotion, now that a second owner exists  ->  200
+────────────────────────────────────────────────────────────────────────
+
+  PATCH /api/admin/members/cmt34517w000e1sdil7tuqk8s  {"role":"agent"}
+
+  HTTP 200
+  {"member":{…,"email":"owner@acme.test","role":"agent"}}
+
+  PASS, and this is the case that matters. The identical request that was
+  refused in A succeeds here, which proves the guard is about the
+  organization's owner count and not about forbidding people from
+  touching their own row. A self-protection check would have refused
+  both.
+
+────────────────────────────────────────────────────────────────────────
+RESTORE — seed returned to its original state
+────────────────────────────────────────────────────────────────────────
+
+  Signed in as agent2@acme.test, who is the owner at this point (302).
+    PATCH owner@acme.test  -> owner : 200
+    PATCH agent2@acme.test -> agent : 200
+
+  Final state, identical to the starting state:
+
+   email                    | role
+  --------------------------+--------
+   agent1@acme.test         | agent
+   agent2@acme.test         | agent
+   consultant@deskline.test | agent
+   owner@acme.test          | owner
+   viewer@acme.test         | viewer
+
+────────────────────────────────────────────────────────────────────────
+AUDIT — four changes, four events, and none for the refusal
+────────────────────────────────────────────────────────────────────────
+
+   {"orgId": "org_acme", "toRole": "owner", "fromRole": "agent"}
+   {"orgId": "org_acme", "toRole": "agent", "fromRole": "owner"}
+   {"orgId": "org_acme", "toRole": "owner", "fromRole": "agent"}
+   {"orgId": "org_acme", "toRole": "agent", "fromRole": "owner"}
+
+  Exactly the `{ orgId, fromRole, toRole }` shape Dimension 6 specifies.
+  Four rows for the four successful changes (B, C, and the two restores)
+  and none for the refused request in A — the 409 returns before the
+  update and before `auditLog`, so a rejected change leaves no record of
+  having happened, which is correct: nothing happened.
