@@ -7,35 +7,69 @@ import {
 } from "@upstart13-com/aiden-security";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
+import { createFileAuditSink } from "@/lib/audit-sinks";
+import { aidenConfig } from "@/../aiden.config";
 
 /**
- * Wire the Prisma-backed audit sink. Imported once from
- * `instrumentation.ts` so audit events from `aiden-auth` (sign-in,
- * sign-out, register) and `aiden-security` (ownership / ability
- * failures) land in the `audit_logs` table.
+ * Wire the audit sink, chosen by `aiden.config.ts` → `audit.sink`.
+ *
+ * This is the whole swap: one flag decides which function is registered,
+ * and no call site changes. `auditLog({ event, resourceId, metadata })`
+ * in a route is byte-identical either way — the routes do not know a sink
+ * exists.
+ *
+ * Imported from `src/lib/security.ts` (every API route) and from
+ * `src/lib/auth.ts` (the NextAuth route, which never reaches security.ts),
+ * not only from `instrumentation.ts`. Next bundles instrumentation into a
+ * separate server chunk with its own module instance, so a sink
+ * registered only there lands on an instance the handlers never resolve —
+ * see `docs/ops-diagnosis.md` §5.
  *
  * `captureRequestMeta` reads from Next.js's per-request `headers()`
  * helper. It returns `{}` outside a request (e.g. background jobs)
  * because `headers()` throws there — the sink falls back to nulls.
  */
+
+/**
+ * Read the configured sink mode across a function boundary.
+ *
+ * `aiden.config.ts` closes with `as const`, so `audit.sink` has the
+ * literal type of whichever value is written there today, and TypeScript
+ * narrows a directly-assigned const to that same literal — it then reports
+ * the other branch as an impossible comparison. The branch is not
+ * impossible; it is unreachable *until someone flips the flag*, which is
+ * the entire point of the flag.
+ *
+ * A declared return type states that honestly and is not narrowed at the
+ * call site. A cast would also silence it, but a cast asserts something
+ * about the value; this asserts something about when it is known. The
+ * config literal stays free of casts either way, which matters because
+ * the CLI parses that file (see `.claude/fixes/aiden-cli.md`).
+ */
+function auditSinkMode(): "prisma" | "file" {
+  return aidenConfig.audit.sink;
+}
+
 setAuditSink(
-  createPrismaAuditSink({
-    prisma,
-    captureRequestMeta: () => {
-      try {
-        const h = headers() as unknown as Headers;
-        return {
-          ipAddress:
-            h.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-            h.get("x-real-ip") ??
-            null,
-          userAgent: h.get("user-agent") ?? null,
-        };
-      } catch {
-        return {};
-      }
-    },
-  })
+  auditSinkMode() === "file"
+    ? createFileAuditSink()
+    : createPrismaAuditSink({
+        prisma,
+        captureRequestMeta: () => {
+          try {
+            const h = headers() as unknown as Headers;
+            return {
+              ipAddress:
+                h.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+                h.get("x-real-ip") ??
+                null,
+              userAgent: h.get("user-agent") ?? null,
+            };
+          } catch {
+            return {};
+          }
+        },
+      })
 );
 
 export const auditReader = createAuditReader({ prisma });

@@ -1,0 +1,149 @@
+DeskLine — audit sink swappability (D7 of the plan's Audit dimension)
+Date:  2026-08-22
+Result: PASS. One config line moves every audit event from the database to a
+        file and back, with no call site touched, and the events are provably
+        absent from the table while the flag points at the file.
+
+────────────────────────────────────────────────────────────────────────
+THE MECHANISM
+────────────────────────────────────────────────────────────────────────
+
+  `setAuditSink` accepts any function matching the `AuditSink` contract:
+
+    type AuditSink = (record: AuditLogRecord & {
+      timestamp: string; requestId?: string; userId?: string;
+    }) => void | Promise<void>;
+
+  So swapping destinations is a question of which function is registered,
+  never of editing a caller. `src/lib/audit-sinks.ts` adds an NDJSON file
+  sink; `src/lib/audit.ts` chooses between it and the Prisma sink from
+  `aiden.config.ts` → `audit.sink`.
+
+  NDJSON rather than a JSON array: an array has to be rewritten to stay
+  valid, and an append-only log that is rewritten on every write is not
+  append-only. One object per line survives truncation and is what log
+  rotation expects.
+
+  The sink never throws. `auditLog()` is fire-and-forget — the SDK does
+  not await it and will not see a rejection — so an escaping failure would
+  be an unhandled rejection and a swallowed one would lose events
+  silently. Every failure goes through the app logger instead.
+
+────────────────────────────────────────────────────────────────────────
+1. THE EDIT — one line
+────────────────────────────────────────────────────────────────────────
+
+  aiden.config.ts
+
+    -    sink: "prisma",
+    +    sink: "file",
+
+  `git diff --name-only`, filtered to the source files this swap could
+  have touched:
+
+    aiden.config.ts
+
+  No route, no component. `auditLog({ event, resourceId, metadata })` in a
+  handler is byte-identical either way; the routes do not know a sink
+  exists.
+
+────────────────────────────────────────────────────────────────────────
+2. WITH THE FLAG ON "file" — events land in the file, and NOT in the table
+────────────────────────────────────────────────────────────────────────
+
+  Before: audit_logs = 117 rows. logs/audit.ndjson did not exist.
+
+  Signed in as agent1@acme.test and created one ticket
+  (id cmt3zo1xg00007gdixyg44sue).
+
+  After: audit_logs = **117 rows — unchanged**.
+         logs/audit.ndjson created, 686 bytes, **3 lines**:
+
+    [1] auth.signin    resourceId=—
+                       metadata={"provider":"credentials"}
+                       ts=2026-08-22T06:20:04.214Z
+    [2] ticket.create  resourceId=cmt3zo1xg00007gdixyg44sue
+                       metadata={"orgId":"org_acme","status":"open"}
+                       ts=2026-08-22T06:20:05.211Z  requestId=8b0ce248
+    [3] ai.classify    resourceId=cmt3zo1xg00007gdixyg44sue
+                       metadata={"orgId":"org_acme","model":"claude-haiku-4-5",
+                                 "priority":"low"}
+                       ts=2026-08-22T06:20:06.470Z  requestId=8b0ce248
+
+  Absence proved directly rather than inferred from the unchanged total:
+
+    SELECT count(*) FROM audit_logs WHERE resource_id='cmt3zo1xg00007gdixyg44sue';
+    -> 0
+
+  Note lines [2] and [3] share `requestId=8b0ce248` — the request context
+  survives into the sink exactly as it does for the Prisma sink, so
+  correlation is not something the database was providing.
+
+  Raw sample kept at `docs/evidence/audit-file-sink-sample.ndjson`.
+
+────────────────────────────────────────────────────────────────────────
+3. REVERTED — events go straight back to the table
+────────────────────────────────────────────────────────────────────────
+
+    -    sink: "file",
+    +    sink: "prisma",
+
+  Rebuilt, restarted, created one more ticket.
+
+    audit_logs : 117 -> **120**  (auth.signin, ticket.create, ai.classify)
+    file       : 3 lines -> **3 lines**, no new appends
+
+    SELECT event FROM audit_logs WHERE resource_id='cmt3zqz6p0001t8dird59szaf';
+    -> ticket.create
+       ai.classify
+
+  Both directions demonstrated, not just the interesting one.
+
+────────────────────────────────────────────────────────────────────────
+4. WHAT THE SWAP DOES NOT COVER — stated, not discovered later
+────────────────────────────────────────────────────────────────────────
+
+  It changes where events are **written**. The org-scoped viewer still
+  reads `prisma.auditLog` through `listOrgAuditEntries`, so while the file
+  sink is active the `/admin/audit` page goes quiet: new events are
+  landing somewhere it does not look. That is the honest consequence of a
+  write-side swap and is documented in `src/lib/audit-sinks.ts` rather
+  than left for someone to trip over.
+
+  A deployment that genuinely wanted file-based audit would need a reader
+  for it too, or would accept that the in-app viewer covers only the
+  database era.
+
+  Retention is unchanged by any of this and remains consumer-owned: for
+  the file sink it is log rotation, for the Prisma sink a scheduled
+  truncation past the compliance window. Neither belongs inside
+  `aiden-security`.
+
+────────────────────────────────────────────────────────────────────────
+5. A TYPE-SYSTEM NOTE WORTH KEEPING
+────────────────────────────────────────────────────────────────────────
+
+  `aiden.config.ts` closes with `as const`, so `audit.sink` carries the
+  literal type of whichever value is written today. A directly-assigned
+  const narrows to that same literal, and TypeScript then rejects the
+  comparison against the other value:
+
+    error TS2367: This comparison appears to be unintentional because the
+    types '"prisma"' and '"file"' have no overlap.
+
+  The branch is not impossible — it is unreachable until someone flips the
+  flag, which is the whole point of the flag. Resolved with a function
+  whose declared return type is the union, since a return type is not
+  narrowed at the call site. A cast would also have silenced it, but a
+  cast asserts something about the value where this asserts something
+  about *when it is known*. The config literal stays free of casts either
+  way, which matters because the CLI parses that file.
+
+────────────────────────────────────────────────────────────────────────
+STATE LEFT BEHIND
+────────────────────────────────────────────────────────────────────────
+
+  `audit.sink` back to "prisma" and rebuilt. Both demonstration tickets
+  deleted — 12 tickets, zero outside the seed fixture set. `logs/` is
+  gitignored; the sample under `docs/evidence/` is the committed artefact.
+  tsc, lint and build at zero.

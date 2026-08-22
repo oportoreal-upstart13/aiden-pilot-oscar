@@ -49,3 +49,6 @@ yarn-error.log*
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# local audit file sink (aiden.config.ts audit.sink = "file")
+logs/

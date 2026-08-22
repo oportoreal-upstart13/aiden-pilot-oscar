@@ -893,3 +893,29 @@ The build is verified against this document, not against memory:
 
 Every deviation surfaced during the build is recorded in the deviation log at
 the top of this document, with a date and root cause. None is silently absorbed.
+
+### Verification results — 2026-08-22
+
+Performed, not asserted. Every row names the artefact it was checked against
+and what came back. Captures in `docs/evidence/`.
+
+| # | Dimension | Verified against | Result |
+|---|-----------|------------------|--------|
+| 0 | Pre-build findings | Each finding re-checked against the installed packages. F12 was **retracted by experiment** before it reached the build; F3 was **narrowed** after Groq reported real streaming usage, proving the zero is specific to the OpenAI adapter. | **PASS with two corrections.** A findings table that never changes under testing is a table nobody tested. |
+| 1 | How this build differs | The three decisions traced to running behaviour: multi-org via the dual-membership consultant (probe 8), the audit viewer that labels what it cannot attribute (probe 10), route-handler tests (40 tests, 12 suites). | **PASS** |
+| 2 | Outcome | Each persona bullet walked end to end and written up as `docs/demo-walkthrough.md` with real ids. | **PASS** |
+| 3 | Data | `prisma migrate status` → "Database schema is up to date", 2 migrations. Seed run **twice** with identical counts — 2 orgs, 9 users, 10 memberships, 12 tickets, 2 roles, 3 permissions — so idempotence is measured, not claimed. Index verified by `auto_explain` against the statement Prisma actually sends. | **PASS.** One finding: predicate B uses `audit_logs_timestamp_idx`, not the actor index the plan claimed (D7, corrected in place). |
+| 4 | Permissions | Role behaviour exercised over HTTP: agent creates and drafts; viewer reads and is refused with 403; owner reads every ticket and is refused mutation with 403. | **PASS** |
+| 5 | Request perimeter | All **12** handlers read line by line for call order. Every one runs `withAuth → parseRequest/parseQuery → org-filtered read → ownership step → assertCan → work + auditLog → response`. Reads with no row (`/api/tickets`, `/api/orgs`, the admin lists) correctly have no ownership step. | **PASS** |
+| 5 | Smoke suite | `npm run smoke` against a production build: **16/16**. Probe 5 compares three 404 bodies byte for byte, all `{"error":"Resource not found"}`. | **PASS.** Two probes had previously passed while testing nothing — a curl jar without `-c`, and a vacuous disjointness check. Both are recorded in `.claude/fixes/testing.md`. |
+| 6 | Audit events | Queried against real rows, with `jsonb_object_keys` to compare metadata shape rather than eyeball it. All **seven** planned domain events present with exactly the specified keys, plus the three auto-emitted ones relied on. | **PASS.** Verification itself closed a gap: `ticket.update` and `ticket.close` had **never fired** in the whole build until this run — no probe or test reached a successful mutation. Exercised and confirmed. |
+| 6 | Sink swappability | The flag flipped to `"file"`, a ticket created, and absence from `audit_logs` proved by querying the new ticket's `resource_id` (0 rows) rather than inferred from an unchanged total. Reverted and re-verified in the other direction. | **PASS.** `src/lib/audit-sinks.ts`, `docs/evidence/audit-sink-swap-2026-08-22.txt`. This was the last named capability in the plan with nothing behind it. |
+| 6 | Cost telemetry | 6 `AIUsage` rows across **both providers on both AI paths** — Anthropic 4 calls / 2 routes, Groq 2 calls / 2 routes. Every count provider-reported; the estimated-usage fallback was never needed. | **PASS** |
+| 7 | Files touched | `git diff 9245060...HEAD --stat` → 90 files, +25,571 / −345. Both committed deletions executed and absent from the build's route manifest. | **PASS.** Eleven files landed outside the plan's list, all recorded as D1–D11. |
+| 8 | Rollback | Exercised for real rather than described: the provider switch reverted in one line, a `defaultProvider` change rebuilt both ways, the last-owner test restored via a full round trip, and every throwaway ticket removed — 12 tickets, **zero outside the seed fixture set**. | **PASS.** The database is in its seeded state after the verification run. |
+
+**Two things this table does not claim.** The Prisma Studio screenshot is not
+here — this session has no browser-automation tool, so it is owed as a manual
+capture; the equivalent data is in `docs/evidence/seed-state-2026-08-22.txt`.
+And `docs/self-assessment.md` maps to the plan's dimensions rather than to the
+Module 12 readiness bars, because that rubric is not present in this repository.
