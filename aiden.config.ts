@@ -39,7 +39,7 @@ export const aidenConfig = {
       anthropic: true,
       google: false,
       mistral: false,
-      groq: false,
+      groq: true,
       cohere: false,
     },
     /**
@@ -52,7 +52,7 @@ export const aidenConfig = {
       anthropic: "claude-haiku-4-5",
       google: "gemini-2.5-flash",
       mistral: "mistral-small-latest",
-      groq: "llama-3.3-70b-versatile",
+      groq: "openai/gpt-oss-20b",
       cohere: "command-r",
     },
   },

@@ -1,0 +1,174 @@
+DeskLine — test and smoke suites (green run)
+Date:  2026-08-22
+Build: npm run build (exit 0), npm start -p 3100
+Runner: node --test + tsx (no framework installed; see .claude/fixes/testing.md)
+
+This supersedes the first run, in which two smoke probes failed. Both
+failures were defects in scripts/smoke.sh, not in the application; the
+diagnosis is kept in suites-2026-08-22.txt and the fixes are recorded
+in .claude/fixes/testing.md. The three corrections:
+
+  1. -c alongside -b on every curl in a session, so a Set-Cookie the
+     server issues mid-run is written back to the jar.
+  2. Disjointness now proves both sides are non-empty first, and
+     asserts the active organization actually changed, before
+     claiming the sets do not overlap.
+  3. GET /api/me is read as .id, not .user.id — that route returns
+     the user flat, with no wrapper.
+
+Database state going in: the orphan ticket cmt39r4et0001mgdimlhcxh2l,
+created during the phase 5 probe-10 setup, was deleted, and the seed
+was re-run twice. Counts were identical after both runs — 2 orgs,
+9 users, 10 memberships, 12 tickets, 2 roles, 3 permissions —
+confirming the seed is idempotent. Zero tickets outside the fixture
+set remain.
+
+PROBE 8 IS A FIRST REAL EXECUTION. Until the cookie fix it compared a
+list against itself and never exercised the switch. It found nothing:
+the switch works, the active organization flips, and the ticket sets
+are disjoint. No application finding.
+
+════════════════════════════════════════════════════════════════
+TEST SUITE — npm test
+════════════════════════════════════════════════════════════════
+
+
+> deskline@0.0.0 test
+> node scripts/test.mjs
+
+running 3 test file(s):
+  src\lib\ai-prompts.test.ts
+  src\lib\validations\tickets.test.ts
+  src\test\routes.test.ts
+
+▶ content never reaches the system prompt
+  ✔ the triage system prompt is a constant, independent of ticket content (3.6424ms)
+  ✔ the draft system prompt depends only on tone, never on the ticket (0.751ms)
+  ✔ the draft system prompt does change with tone (0.7056ms)
+✔ content never reaches the system prompt (10.3726ms)
+▶ the fence cannot be closed early by crafted content
+  ✔ triage strips the delimiters out of the content (1.7677ms)
+  ✔ draft strips the delimiters out of the content (1.0881ms)
+  ✔ hostile content stays between the delimiters (0.5764ms)
+  ✔ the instruction to the model is outside the fence, after it (0.9894ms)
+✔ the fence cannot be closed early by crafted content (9.0727ms)
+▶ the triage output contract
+  ✔ Zod accepts a well-formed classification (4.6084ms)
+  ✔ Zod rejects a value outside the closed set (3.1579ms)
+  ✔ Zod rejects a partial object — nothing partial is ever persisted (2.3457ms)
+  ✔ the JSON Schema mirror satisfies OpenAI strict mode (3.6376ms)
+  ✔ both AI calls are token-bounded per route (0.4671ms)
+✔ the triage output contract (15.9062ms)
+▶ CreateTicketBody
+  ✔ trims and accepts a well-formed ticket (9.2004ms)
+  ✔ rejects whitespace-only fields — trim happens before the length check (3.409ms)
+  ✔ bounds both fields (1.5639ms)
+✔ CreateTicketBody (18.6189ms)
+▶ UpdateTicketBody
+  ✔ refuses status "closed" — closing is POST /close, which emits ticket.close (2.7913ms)
+  ✔ accepts the statuses a PATCH may set (1.2093ms)
+  ✔ rejects an empty object — a no-op update would emit an audit event saying nothing changed (1.0789ms)
+  ✔ accepts a partial update (1.3111ms)
+✔ UpdateTicketBody (7.9892ms)
+▶ ListTicketsQuery
+  ✔ defaults limit to 25 when absent (2.1991ms)
+  ✔ coerces the string a query string actually delivers (1.847ms)
+  ✔ bounds limit so a list read cannot be turned into a full scan (2.3138ms)
+  ✔ filtering by closed is allowed — only transitioning to it is not (0.5476ms)
+  ✔ rejects an unknown status (1.7423ms)
+✔ ListTicketsQuery (10.4588ms)
+▶ DraftBody
+  ✔ defaults the tone (2.1543ms)
+  ✔ rejects a tone outside the offered set (1.3699ms)
+✔ DraftBody (4.0114ms)
+▶ perimeter order
+  ✔ 401 before anything else (18.4856ms)
+  ✔ authentication precedes body validation — a malformed body from an anonymous caller is still 401, not 400 (43.64ms)
+  ✔ 400 once authenticated, with the flattened issue map (63.1298ms)
+  ✔ ability denial is 403 and is decided after the row is visible (163.2969ms)
+✔ perimeter order (6967.7135ms)
+▶ route params are validated before any query
+  ✔ an id past the length bound is rejected, not passed to the database (52.7051ms)
+  ✔ a blank id does not resolve to some arbitrary ticket (33.3602ms)
+✔ route params are validated before any query (90.2293ms)
+▶ the ownership step degenerates by role
+  ✔ an agent is refused a colleague's ticket in the same org (40.0293ms)
+  ✔ a viewer reads the very same ticket (37.9799ms)
+  ✔ an owner reads it too, and still cannot mutate it (91.115ms)
+  ✔ the list applies the same boundary the detail read enforces (52.5378ms)
+✔ the ownership step degenerates by role (224.5152ms)
+▶ cross-tenant reads are indistinguishable from missing ones
+  ✔ a Globex ticket is 404 for an Acme agent (83.9565ms)
+  ✔ cross-tenant, not-yours and nonexistent share one body, byte for byte (241.7484ms)
+✔ cross-tenant reads are indistinguishable from missing ones (326.5663ms)
+▶ the org cookie is untrusted input
+  ✔ forging it towards another organization grants nothing (1870.793ms)
+  ✔ switching to an organization the caller does not belong to is 404 (69.3271ms)
+✔ the org cookie is untrusted input (1940.89ms)
+ℹ tests 40
+ℹ suites 12
+ℹ pass 40
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11010.5401
+
+════════════════════════════════════════════════════════════════
+SMOKE SUITE — npm run smoke
+════════════════════════════════════════════════════════════════
+
+
+> deskline@0.0.0 smoke
+> bash scripts/smoke.sh
+
+DeskLine smoke suite
+base: http://localhost:3100
+date: 2026-08-22 04:19:12 UTC
+
+signing in…
+  agent1@acme.test -> 302
+  agent2@acme.test -> 302
+  viewer@acme.test -> 302
+  owner@acme.test -> 302
+  consultant@deskline.test -> 302
+  agent1@globex.test -> 302
+
+1. unauthenticated GET /api/tickets
+  PASS  anonymous read is refused (HTTP 401)
+
+2. malformed create body
+  PASS  empty subject and body are rejected (HTTP 400)
+
+3. Acme agent requests a Globex ticket
+  PASS  cross-tenant read looks like a missing row (HTTP 404)
+
+4. agent A patches agent B's same-org ticket
+  PASS  same-org, not-yours mutation is refused (HTTP 404)
+
+5. nonexistent id, compared byte for byte against not-yours
+  PASS  nonexistent id is 404 (HTTP 404)
+  PASS  not-yours, missing and cross-tenant bodies are identical: {"error":"Resource not found"}
+
+6. viewer posts to /draft
+  PASS  viewer may read the ticket (HTTP 200)
+  PASS  viewer is denied the AI action (HTTP 403)
+
+7. Acme user forges the deskline_org cookie towards Globex
+  PASS  forged cookie grants nothing — activeOrgId=org_acme, Globex rows=0
+
+8. dual-membership consultant switches organization
+  PASS  switch to a member organization succeeds (HTTP 200)
+  PASS  the active organization actually changed (org_acme -> org_globex)
+  PASS  1 Acme ticket(s) and 6 Globex ticket(s), zero in common
+
+9. switch towards an organization the caller does not belong to
+  PASS  non-member switch is indistinguishable from a missing org (HTTP 404)
+
+10. Acme owner reads the org-scoped audit viewer
+  PASS  owner may read the audit trail (HTTP 200)
+  PASS  no domain event from another organization (50 entries, 46 attributed by actor)
+  PASS  no row whose actor belongs exclusively to Globex (checked by id cmt344ymw000a1sdixu4fx61c)
+
+────────────────────────────────────────
+passed: 16   failed: 0

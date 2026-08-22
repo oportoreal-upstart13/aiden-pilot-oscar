@@ -1,0 +1,228 @@
+DeskLine — test and smoke suites
+Date:  2026-08-22
+Build: npm run build (exit 0, clean .next), npm start -p 3100
+Runner: node --test + tsx (no framework installed; see .claude/fixes/testing.md)
+
+════════════════════════════════════════════════════════════════
+TEST SUITE — npm test
+════════════════════════════════════════════════════════════════
+
+
+> deskline@0.0.0 test
+> node scripts/test.mjs
+
+running 3 test file(s):
+  src\lib\ai-prompts.test.ts
+  src\lib\validations\tickets.test.ts
+  src\test\routes.test.ts
+
+▶ content never reaches the system prompt
+  ✔ the triage system prompt is a constant, independent of ticket content (4.5021ms)
+  ✔ the draft system prompt depends only on tone, never on the ticket (1.7697ms)
+  ✔ the draft system prompt does change with tone (0.7793ms)
+✔ content never reaches the system prompt (14.59ms)
+▶ the fence cannot be closed early by crafted content
+  ✔ triage strips the delimiters out of the content (3.6538ms)
+  ✔ draft strips the delimiters out of the content (2.0334ms)
+  ✔ hostile content stays between the delimiters (1.2952ms)
+  ✔ the instruction to the model is outside the fence, after it (2.039ms)
+✔ the fence cannot be closed early by crafted content (11.3952ms)
+▶ the triage output contract
+  ✔ Zod accepts a well-formed classification (12.4084ms)
+  ✔ Zod rejects a value outside the closed set (5.5201ms)
+  ✔ Zod rejects a partial object — nothing partial is ever persisted (4.7945ms)
+  ✔ the JSON Schema mirror satisfies OpenAI strict mode (6.4884ms)
+  ✔ both AI calls are token-bounded per route (0.7973ms)
+✔ the triage output contract (34.3572ms)
+▶ CreateTicketBody
+  ✔ trims and accepts a well-formed ticket (12.741ms)
+  ✔ rejects whitespace-only fields — trim happens before the length check (8.2862ms)
+  ✔ bounds both fields (2.0023ms)
+✔ CreateTicketBody (28.6267ms)
+▶ UpdateTicketBody
+  ✔ refuses status "closed" — closing is POST /close, which emits ticket.close (4.0506ms)
+  ✔ accepts the statuses a PATCH may set (1.1853ms)
+  ✔ rejects an empty object — a no-op update would emit an audit event saying nothing changed (1.8177ms)
+  ✔ accepts a partial update (2.2017ms)
+✔ UpdateTicketBody (11.6948ms)
+▶ ListTicketsQuery
+  ✔ defaults limit to 25 when absent (3.7999ms)
+  ✔ coerces the string a query string actually delivers (2.86ms)
+  ✔ bounds limit so a list read cannot be turned into a full scan (7.879ms)
+  ✔ filtering by closed is allowed — only transitioning to it is not (1.0119ms)
+  ✔ rejects an unknown status (1.2453ms)
+✔ ListTicketsQuery (18.9644ms)
+▶ DraftBody
+  ✔ defaults the tone (3.1747ms)
+  ✔ rejects a tone outside the offered set (2.225ms)
+✔ DraftBody (6.2856ms)
+▶ perimeter order
+  ✔ 401 before anything else (142.9576ms)
+  ✔ authentication precedes body validation — a malformed body from an anonymous caller is still 401, not 400 (76.0822ms)
+  ✔ 400 once authenticated, with the flattened issue map (132.0535ms)
+  ✔ ability denial is 403 and is decided after the row is visible (288.5144ms)
+✔ perimeter order (11239.0097ms)
+▶ route params are validated before any query
+  ✔ an id past the length bound is rejected, not passed to the database (84.8909ms)
+  ✔ a blank id does not resolve to some arbitrary ticket (45.133ms)
+✔ route params are validated before any query (131.7664ms)
+▶ the ownership step degenerates by role
+  ✔ an agent is refused a colleague's ticket in the same org (85.8958ms)
+  ✔ a viewer reads the very same ticket (137.8224ms)
+  ✔ an owner reads it too, and still cannot mutate it (218.7725ms)
+  ✔ the list applies the same boundary the detail read enforces (83.2907ms)
+✔ the ownership step degenerates by role (528.089ms)
+▶ cross-tenant reads are indistinguishable from missing ones
+  ✔ a Globex ticket is 404 for an Acme agent (98.8887ms)
+  ✔ cross-tenant, not-yours and nonexistent share one body, byte for byte (397.7145ms)
+✔ cross-tenant reads are indistinguishable from missing ones (500.3389ms)
+▶ the org cookie is untrusted input
+  ✔ forging it towards another organization grants nothing (2689.5432ms)
+  ✔ switching to an organization the caller does not belong to is 404 (147.4093ms)
+✔ the org cookie is untrusted input (2838.7258ms)
+ℹ tests 40
+ℹ suites 12
+ℹ pass 40
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 18364.9758
+
+════════════════════════════════════════════════════════════════
+SMOKE SUITE — npm run smoke
+════════════════════════════════════════════════════════════════
+
+
+> deskline@0.0.0 smoke
+> bash scripts/smoke.sh
+
+DeskLine smoke suite
+base: http://localhost:3100
+date: 2026-08-22 03:57:42 UTC
+
+signing in…
+  agent1@acme.test -> 302
+  agent2@acme.test -> 302
+  viewer@acme.test -> 302
+  owner@acme.test -> 302
+  consultant@deskline.test -> 302
+  agent1@globex.test -> 302
+
+1. unauthenticated GET /api/tickets
+  PASS  anonymous read is refused (HTTP 401)
+
+2. malformed create body
+  PASS  empty subject and body are rejected (HTTP 400)
+
+3. Acme agent requests a Globex ticket
+  PASS  cross-tenant read looks like a missing row (HTTP 404)
+
+4. agent A patches agent B's same-org ticket
+  PASS  same-org, not-yours mutation is refused (HTTP 404)
+
+5. nonexistent id, compared byte for byte against not-yours
+  PASS  nonexistent id is 404 (HTTP 404)
+  PASS  not-yours, missing and cross-tenant bodies are identical: {"error":"Resource not found"}
+
+6. viewer posts to /draft
+  PASS  viewer may read the ticket (HTTP 200)
+  PASS  viewer is denied the AI action (HTTP 403)
+
+7. Acme user forges the deskline_org cookie towards Globex
+  PASS  forged cookie grants nothing — activeOrgId=org_acme, Globex rows=0
+
+8. dual-membership consultant switches organization
+  PASS  switch to a member organization succeeds (HTTP 200)
+  FAIL  1 ticket(s) appear in both organizations — before=[tkt_acme_5] after=[tkt_acme_5]
+
+9. switch towards an organization the caller does not belong to
+  PASS  non-member switch is indistinguishable from a missing org (HTTP 404)
+
+10. Acme owner reads the org-scoped audit viewer
+  PASS  owner may read the audit trail (HTTP 200)
+  PASS  no domain event from another organization (43 entries, 35 attributed by actor)
+  FAIL  could not resolve the Globex agent's id — probe 10 would be vacuous
+
+────────────────────────────────────────
+passed: 13   failed: 2
+
+════════════════════════════════════════════════════════════════
+DIAGNOSIS OF THE TWO SMOKE FAILURES — recorded before any fix
+════════════════════════════════════════════════════════════════
+
+Both failures are defects in scripts/smoke.sh. Neither is a defect in
+the application, and both were confirmed by reproducing them by hand
+rather than inferred from the output.
+
+────────────────────────────────────────────────────────────────
+Probe 8 — "1 ticket(s) appear in both organizations"
+────────────────────────────────────────────────────────────────
+
+  Reported: before=[tkt_acme_5] after=[tkt_acme_5]
+
+  The two lists are not overlapping. They are *identical*, because the
+  organization never changed: the consultant was still in Acme for the
+  second read.
+
+  Root cause: the script's `status()` and `body()` helpers pass
+  `curl -b "$jar"` but not `-c "$jar"`, so cookies the server sets during
+  the run are read from the jar and never written back to it. The switch
+  route's `Set-Cookie: deskline_org=org_globex` was therefore discarded
+  by curl, and the follow-up list request carried the old cookie.
+
+  Reproduced by hand:
+
+    switch WITHOUT -c  -> HTTP 200, jar does NOT contain deskline_org
+    switch WITH    -c  -> HTTP 200, jar contains: deskline_org  org_globex
+    list after the cookie is kept:
+      org_globex :: cmt39r4et0001mgdimlhcxh2l, tkt_globex_6, tkt_globex_5,
+                    tkt_globex_4, tkt_globex_3, tkt_globex_2, tkt_globex_1
+
+  So the application behaves exactly as the plan specifies — the switch
+  works, and the list flips to a disjoint Globex set. The probe was
+  asserting against a switch that, from the client's point of view, had
+  never happened.
+
+  Second, independent weakness in the same probe: the overlap check is
+  `a.filter(x => x && b.includes(x)).length === 0`, which passes on two
+  *empty* sets. Had the consultant owned no tickets in Acme, the probe
+  would have reported PASS while testing nothing. A disjointness probe
+  needs to assert that both sides are non-empty before it can mean
+  anything — the same non-vacuity discipline probe 10 already applies.
+
+────────────────────────────────────────────────────────────────
+Probe 10 — "could not resolve the Globex agent's id"
+────────────────────────────────────────────────────────────────
+
+  The script reads the Globex agent's user id from `GET /api/me` as
+  `.user.id`. That route returns the user object flat:
+
+    {"id":"cmt344ymw000a1sdixu4fx61c","email":"agent1@globex.test",
+     "name":"Farah Haddad","image":null,"emailVerified":null,
+     "createdAt":"...","hasPassword":true,"accounts":[],
+     "roles":[{"name":"member",…}]}
+
+  There is no `user` wrapper, so `.user.id` was undefined and the guard
+  correctly refused to run a vacuous check.
+
+  This is precisely the failure mode `.claude/fixes/ui.md` already
+  documents — "Never assume `{ items }`, `{ data }`, or
+  `{ <resourceName> }`; read the exact `return NextResponse.json(...)`
+  line first" — applied to a script instead of a component. The lesson
+  was in the repository and was not followed.
+
+  Note the guard did its job: rather than silently comparing against
+  `undefined` and reporting PASS, it failed loudly and said the probe
+  would be vacuous. The first assertion of probe 10 — no domain event
+  from another organization, 43 entries, 35 attributed by actor — did
+  pass on its own.
+
+────────────────────────────────────────────────────────────────
+Incidental observation
+────────────────────────────────────────────────────────────────
+
+  The Globex list above contains `cmt39r4et0001mgdimlhcxh2l`, a ticket
+  created during the phase 5 probe-10 setup and never removed. Seed
+  pollution from an earlier phase, not from this run — this suite writes
+  no tickets.
