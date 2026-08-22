@@ -180,6 +180,19 @@ repository's actual state. Pending approval.
 >   rule 1 of the design system and is graded as binary, so leaving it enforced
 >   by review alone while a fix entry claimed otherwise was the worst of both.
 >   Verified by probe before the claim was restored.
+> - **D12 · 2026-08-22 · `User.email` changed to `citext`, with a migration
+>   outside Dimension 3's two.** Root cause: a reported sign-in failure that was
+>   not a bad password. `credentialsProvider` and `createRegisterHandler` both
+>   look users up on the raw submitted string, so on a `text` column sign-in is
+>   case-sensitive and `Owner@globex.test` never finds `owner@globex.test` —
+>   and because `authorize` returns `null` for "not found" and "bad password"
+>   alike, the user is told the password is wrong. The same gap lets two
+>   accounts differ only in capitalisation. Fixed in the column rather than at a
+>   call site so every lookup is covered and the unique index becomes
+>   case-insensitive with it; patching one side only would have locked out
+>   whichever population was already registered the other way. Zero existing
+>   rows collide under the new semantics, checked before applying. Recorded in
+>   `.claude/fixes/aiden-auth.md` and owed upstream.
 
 ---
 

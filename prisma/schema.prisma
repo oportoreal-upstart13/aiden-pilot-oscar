@@ -138,7 +138,21 @@ model Ticket {
 model User {
   id            String    @id @default(cuid())
   name          String?
-  email         String    @unique
+  // `citext` — case-insensitive text. Both `credentialsProvider` and
+  // `createRegisterHandler` in aiden-auth look users up with
+  // `findUnique({ where: { email } })` on the raw string, and neither
+  // normalises it. On a plain `text` column that makes login
+  // case-sensitive, so `Owner@globex.test` fails to find
+  // `owner@globex.test` and the caller is told the *password* is wrong —
+  // `authorize` returns null for "not found" and "bad password" alike.
+  // It also lets two accounts differ only in capitalisation, since the
+  // unique constraint would see them as distinct.
+  //
+  // Fixing it in the column rather than at one call site means every
+  // lookup is covered — login, registration's duplicate check, and
+  // anything written later — and the unique index becomes
+  // case-insensitive along with it.
+  email         String    @unique @db.Citext
   emailVerified DateTime? @map("email_verified")
   image         String?
   passwordHash  String?   @map("password_hash")
