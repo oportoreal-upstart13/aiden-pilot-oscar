@@ -4,7 +4,7 @@ import { withAuthRoute } from "@/lib/routes";
 import { abilities } from "@/lib/abilities";
 import { prisma } from "@/lib/prisma";
 import { resolveActiveOrg } from "@/lib/org";
-import { orgTicketsWhere } from "@/lib/tickets";
+import { orgTicketsWhere, ticketDetailSelect } from "@/lib/tickets";
 import { CreateTicketBody, ListTicketsQuery } from "@/lib/validations/tickets";
 import { triageTicket } from "@/lib/triage";
 
@@ -67,6 +67,7 @@ export const POST = withAuthRoute(async (req, { session }) => {
       subject: body.subject,
       body: body.body,
     },
+    select: ticketDetailSelect,
   });
 
   auditLog({
@@ -90,6 +91,7 @@ export const POST = withAuthRoute(async (req, { session }) => {
   const classified = await prisma.ticket.update({
     where: { id: ticket.id },
     data: triaged.result,
+    select: ticketDetailSelect,
   });
 
   auditLog({

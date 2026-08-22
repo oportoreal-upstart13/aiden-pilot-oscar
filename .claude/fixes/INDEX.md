@@ -11,8 +11,9 @@
 | AIDEN Security   | `aiden-security.md`   | 1       | 1 of 1                 | 2026-08-21   | New    |
 | AIDEN AI         | `aiden-ai.md`         | 2       | 2 of 2                 | 2026-08-21   | New    |
 | Testing          | `testing.md`          | 3       | 1 of 3                 | 2026-08-22   | New    |
+| AIDEN CLI        | `aiden-cli.md`        | 4       | 0 of 4                 | 2026-08-22   | New    |
 
-**Total: 24 active entries across 7 categories · 9 structurally prevented**
+**Total: 28 active entries across 8 categories · 9 structurally prevented**
 
 > On 2026-08-21 the hardcoded-colour entry in `ui.md` was found to be claiming
 > `[STRUCTURALLY PREVENTED]` by an ESLint rule that did not exist in this

@@ -1,0 +1,127 @@
+DeskLine — live AI provider switch (Capability E)
+Date: 2026-08-22
+Result: PASS. One config line, zero route edits, both providers exercised on
+        both AI paths, all usage provider-reported.
+
+────────────────────────────────────────────────────────────────────────
+1. THE EDIT — one line
+────────────────────────────────────────────────────────────────────────
+
+  aiden.config.ts
+
+    -    defaultProvider: "anthropic",
+    +    defaultProvider: "groq",
+
+  `git diff --name-only` immediately after, filtered to source:
+
+    aiden.config.ts
+
+  No route, no component, no library file. `src/lib/ai.ts` resolves the
+  live client from `ai.defaultProvider` and every call site goes through
+  `getAI()`, so nothing downstream names a provider.
+
+  Reverted the same way at the end of the rehearsal, back to "anthropic".
+
+────────────────────────────────────────────────────────────────────────
+2. BOTH PROVIDERS, BOTH AI PATHS, REAL USAGE
+────────────────────────────────────────────────────────────────────────
+
+   provider  | model              | route                        | prompt | compl | cost_usd
+  -----------+--------------------+------------------------------+--------+-------+----------
+   anthropic | claude-haiku-4-5   | POST /api/tickets            |    247 |    35 | 0.000338
+   anthropic | claude-haiku-4-5   | POST /api/tickets            |    263 |    35 | 0.000350
+   anthropic | claude-haiku-4-5   | POST /api/tickets/[id]/draft |    413 |    97 | 0.000718
+   anthropic | claude-haiku-4-5   | POST /api/tickets            |    247 |    35 | 0.000338
+   groq      | openai/gpt-oss-20b | POST /api/tickets            |    345 |   171 | 0.000120
+   groq      | openai/gpt-oss-20b | POST /api/tickets/[id]/draft |    400 |   284 | 0.000182
+
+   provider  | calls | prompt | completion | cost
+  -----------+-------+--------+------------+----------
+   anthropic |     4 |   1170 |        202 | 0.001744
+   groq      |     2 |    745 |        455 | 0.000302
+
+  Both providers cover both routes — the structured-output call
+  (`complete`) and the streamed call (`stream`). Every figure is
+  provider-reported, not estimated; `usageSource` was never needed
+  because no path fell back to estimation.
+
+  Audit events carry the model that actually served the request:
+
+    ai.classify  {"model": "openai/gpt-oss-20b", "orgId": "org_acme", "priority": "urgent"}
+    ai.draft     {"tone": "concise", "model": "openai/gpt-oss-20b", "orgId": "org_acme"}
+    ai.classify  {"model": "claude-haiku-4-5",  "orgId": "org_globex", "priority": "high"}
+
+────────────────────────────────────────────────────────────────────────
+3. THE INTERESTING PART — three providers, three structured-output
+   mechanisms, and what that does to the fence workaround
+────────────────────────────────────────────────────────────────────────
+
+  The prediction recorded before the rehearsal was that `stripCodeFence`
+  would be a no-op on Groq. **Confirmed.**
+
+  Groq, ticket created through the app, live:
+
+    "priority":"urgent","category":"billing","sentiment":"angry"
+
+  And the same prompt issued directly, to see the raw reply:
+
+    RAW>>>{"priority":"urgent","category":"billing","sentiment":"frustrated"}<<<RAW
+    parsed: {"priority":"urgent","category":"billing","sentiment":"frustrated"}
+
+  No code fence, and `parsed` is populated — so `triage.ts` takes
+  `response.parsed` and `stripCodeFence` never runs. Contrast with
+  Anthropic, where `parsed` is always undefined and the reply arrives
+  wrapped in ```json … ```, which is the only reason the fence-stripping
+  exists.
+
+  Three enabled-or-tested providers, three different mechanisms, from the
+  adapters themselves:
+
+    Anthropic  responseSchema is never sent to the vendor. Free text.
+               claude-haiku-4-5 fences it despite the prompt forbidding
+               that, so stripCodeFence carries the path.
+    OpenAI     response_format: { type: "json_schema", strict: true }.
+               The schema is enforced by the vendor.
+    Groq       response_format: { type: "json_object" } — JSON mode
+               (dist/groq.js:147). Valid JSON is guaranteed, which is why
+               no fence appears, but the SCHEMA is not sent, so the shape
+               is unconstrained.
+
+  The consequence is the point of the whole F10 design decision: on none
+  of the three is the *shape* guaranteed by the app's own code except
+  through Zod. Groq will always return JSON and can still return the
+  wrong keys; `TriageResult.safeParse` is what stands between that and a
+  partial write. The app-level guarantee is not a workaround for a
+  missing SDK feature — it is the only thing that holds across all three.
+
+  One more datum the rehearsal produced, unplanned: **Groq reports real
+  usage on the streamed call** — 400 prompt / 284 completion tokens in
+  the SSE `done` frame and in `ai_usage`. Finding F3's streaming-zero
+  problem is therefore specific to the **OpenAI adapter**, which omits
+  `stream_options: { include_usage: true }`, and not a general property
+  of OpenAI-compatible providers. Groq goes through `groq-sdk` and gets
+  usage in the stream. F3 should be narrowed accordingly.
+
+────────────────────────────────────────────────────────────────────────
+4. WHAT IT TOOK TO GET HERE — recorded because it is the useful part
+────────────────────────────────────────────────────────────────────────
+
+  The first rehearsal failed. `GROQ_API_KEY` held an 84-character key
+  with the prefix `xai-` — a valid key for xAI, the company behind the
+  Grok models, not for Groq, the inference provider whose keys begin with
+  `gsk_`. Every call returned 401 `invalid_api_key`.
+
+  `aiden doctor` reported "all 4 required vars present" and "All checks
+  passed" over that key, because it checks presence and not validity or
+  vendor. Recorded in `.claude/fixes/aiden-cli.md`. The key was rotated
+  and revoked; the rehearsal was re-run and is what section 2 records.
+
+  The degradation path held through the failure, which is worth as much
+  as the success: the ticket was still created, the request still
+  returned 201, the ticket shipped unclassified, the failure was logged
+  with status and message and no ticket content, and no `ai_usage` row
+  was written because the SDK threw before `reportUsage`. That is a third
+  distinct failure mode survived, after a fenced reply and an unsent
+  schema.
+
+  Full narrative: `docs/evidence/groq-switch-rehearsal-2026-08-22.txt`.

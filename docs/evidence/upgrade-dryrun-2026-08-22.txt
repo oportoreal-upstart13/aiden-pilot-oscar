@@ -1,0 +1,138 @@
+DeskLine — aiden upgrade --dry-run
+Date: 2026-08-22
+Result: NOT a no-op. The command fails on Windows for a reason unrelated to
+        upgrades, and the failure message names the wrong cause.
+
+────────────────────────────────────────────────────────────────────────
+THE RUN
+────────────────────────────────────────────────────────────────────────
+
+  $ npx @upstart13-com/aiden-cli upgrade --dry-run
+
+  aiden upgrade (dry-run)
+
+  Current version: 2.0.1
+  ✗ Could not resolve latest version from registry.
+
+  exit 1
+
+────────────────────────────────────────────────────────────────────────
+THE MESSAGE IS WRONG — the registry was never contacted
+────────────────────────────────────────────────────────────────────────
+
+  Every scoped package resolves fine from this machine. There is a
+  user-level ~/.npmrc carrying credentials for npm.pkg.github.com, and
+  the scope is configured:
+
+    $ npm config get @upstart13-com:registry
+    https://npm.pkg.github.com
+
+    $ npm view @upstart13-com/aiden-ai       version   ->  2.0.1
+    $ npm view @upstart13-com/aiden-cli      version   ->  2.0.1
+    $ npm view @upstart13-com/aiden-db       version   ->  2.0.1
+    $ npm view @upstart13-com/aiden-security version   ->  2.0.1
+    $ npm view @upstart13-com/aiden-ui       version   ->  2.0.1
+
+  So the registry is reachable, authenticated, and answering.
+
+────────────────────────────────────────────────────────────────────────
+ROOT CAUSE — spawnSync("npm", …) without shell:true, on Windows
+────────────────────────────────────────────────────────────────────────
+
+  From the CLI's own bundle
+  (…/_npx/40afc756ecb4e6f8/node_modules/@upstart13-com/aiden-cli/dist/cli.js):
+
+    const targetVersion = options.targetVersion
+      ?? await fetchLatestVersion(AIDEN_PACKAGES[0]);
+    if (!targetVersion) {
+      console.error(kleur4.red("✗ Could not resolve latest version from registry."));
+      …
+
+    function fetchLatestVersion(pkg2) {
+      const r = spawnSync("npm", ["view", pkg2, "version"], { encoding: "utf8" });
+      if (r.status !== 0) return null;
+      const version = r.stdout.trim();
+      return version || null;
+    }
+
+    AIDEN_PACKAGES = [
+      "@upstart13-com/aiden-ai",   <- AIDEN_PACKAGES[0], the one queried
+      "@upstart13-com/aiden-auth",
+      "@upstart13-com/aiden-db",
+      "@upstart13-com/aiden-logging",
+      "@upstart13-com/aiden-security",
+      "@upstart13-com/aiden-ui"
+    ]
+
+  On Windows `npm` is `npm.cmd`, and `spawnSync` cannot execute a `.cmd`
+  without `shell: true`. Since Node 18.20 / 20.12 this is deliberate
+  hardening against CVE-2024-27980. Reproduced three ways on Node
+  v22.22.3, same machine, same package the CLI asks for:
+
+    1. From the shell
+       $ npm view @upstart13-com/aiden-ai version
+       2.0.1
+
+    2. Exactly as the CLI does it — spawnSync, no shell
+       { "status": null, "error": "ENOENT", "stdout": "", "stderr": "" }
+
+    3. The same call with shell: true
+       { "status": 0, "stdout": "2.0.1" }
+
+  `r.status` is `null`, not `0`, so `fetchLatestVersion` returns null and
+  the CLI reports a registry problem for a process-spawn failure. The
+  registry is fine; `npm` was never launched.
+
+────────────────────────────────────────────────────────────────────────
+WHICH OF THE FIVE NO-OP CAUSES APPLIES: NONE
+────────────────────────────────────────────────────────────────────────
+
+  The question presumes a no-op. This is not one — a no-op would be the
+  CLI resolving 2.0.1, comparing it with the installed 2.0.1, and
+  reporting nothing to do. It never got that far.
+
+  Two separate answers are worth keeping apart:
+
+  • Would a working upgrade have been a no-op? **Yes.** All six
+    @upstart13-com packages publish 2.0.1 and all six are installed at
+    2.0.1 (verified with `npm view` directly, above, and against
+    node_modules). `aiden.config.ts` declares `version: "2.0.1"`. There
+    is nothing newer to move to, so a functioning `--dry-run` would
+    correctly report no changes.
+
+  • Why did the command fail? **A platform defect in the CLI**, not a
+    property of this repository's state. It would fail identically on a
+    pristine scaffold on any Windows machine, and would not fail on
+    macOS or Linux.
+
+  Note also that `docs/ops-diagnosis.md` — where the plan places the
+  eight upgrade steps, the five no-op causes and the recovery runbook —
+  has not been written yet. That document is still owed, and this
+  finding belongs in it: "the CLI cannot spawn npm on Windows" is a
+  sixth cause that the original five do not cover, and it is the one
+  that actually occurred.
+
+────────────────────────────────────────────────────────────────────────
+WORKAROUND, IF AN UPGRADE IS EVER NEEDED FROM WINDOWS
+────────────────────────────────────────────────────────────────────────
+
+  Run the CLI from WSL or a Unix runner, or upgrade by hand — but note
+  that CLAUDE.md forbids hand-editing @upstart13-com versions in
+  package.json precisely because `aiden upgrade` also runs codemods and
+  migrations. Hand-bumping skips those. The correct path is to fix the
+  CLI (`shell: true`, or resolve `npm.cmd` on win32) rather than to work
+  around it in every consuming project.
+
+────────────────────────────────────────────────────────────────────────
+UNRELATED OBSERVATION FROM THE SAME BUNDLE
+────────────────────────────────────────────────────────────────────────
+
+  The code path immediately above the version fetch refuses to run when
+  the working tree is dirty:
+
+    "working tree is not clean. Commit or stash before running aiden upgrade."
+    return 2;
+
+  This run printed "Current version: 2.0.1" with an uncommitted working
+  tree, so that guard did not fire under `--dry-run`. Sensible for a dry
+  run; worth knowing that the guard exists for the real one.

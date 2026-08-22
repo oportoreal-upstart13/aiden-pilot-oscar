@@ -1,0 +1,145 @@
+DeskLine — Groq provider-switch rehearsal (BLOCKED)
+Date:  2026-08-22
+Result: the switch mechanism works; the rehearsal could not complete
+        because GROQ_API_KEY holds a key for the wrong vendor.
+
+────────────────────────────────────────────────────────────────────────
+WHAT WAS ALREADY IN PLACE
+────────────────────────────────────────────────────────────────────────
+
+  aiden.config.ts already carried, committed before this phase began:
+
+    providers: { …, groq: true, … }
+    models:    { …, groq: "openai/gpt-oss-20b", … }
+
+  GROQ_API_KEY was already present in .env.local with a value, and
+  groq-sdk@1.5.0 is installed.
+
+  Consequence for the expected "doctor goes from 3 to 4 required vars":
+  that transition had already happened. The baseline run at the start of
+  this phase already reported four.
+
+    $ npx @upstart13-com/aiden-cli doctor
+    1. aiden.config       ✓ valid (v2.0.1)
+    2. Environment variables
+                          ✓ all 4 required vars present
+    3. CVE scan           ✓ no vulnerabilities found
+    4. npm audit          ✓ clean
+    5. SDK wiring         ✓ <ThemeProvider> mounted in root layout
+    All checks passed.
+
+  Proven rather than inferred — GROQ_API_KEY was blanked and doctor
+  re-run, which named it:
+
+    2. Environment variables
+       ! GROQ_API_KEY empty — Groq provider
+
+  So the four are DATABASE_URL, AUTH_SECRET, ANTHROPIC_API_KEY and
+  GROQ_API_KEY, and enabling `groq: true` is what added the fourth. The
+  key was restored immediately afterwards.
+
+  .env.example was updated in this phase: ANTHROPIC_API_KEY and
+  GROQ_API_KEY are now uncommented placeholders, since that file's own
+  instruction is to uncomment the providers enabled in aiden.config.ts
+  and both are enabled. The other four stay commented.
+
+────────────────────────────────────────────────────────────────────────
+THE SWITCH ITSELF — one line, zero route edits
+────────────────────────────────────────────────────────────────────────
+
+    -    defaultProvider: "anthropic",
+    +    defaultProvider: "groq",
+
+  `git diff --name-only` after the change listed exactly one source file:
+  aiden.config.ts. No route, no component, no library file was touched.
+  That half of the graded criterion holds.
+
+────────────────────────────────────────────────────────────────────────
+THE BLOCKER — the key belongs to a different company
+────────────────────────────────────────────────────────────────────────
+
+  Rebuilt (exit 0), started, signed in as agent1@acme.test, created a
+  ticket. HTTP 201, and the ticket came back UNCLASSIFIED:
+
+    "priority":null,"category":null,"sentiment":null
+
+  Server log:
+
+    level 50, msg "triage call failed; ticket ships unclassified"
+    err.status 401
+    err.message  401 {"error":{"message":"Invalid API Key",
+                 "type":"invalid_request_error","code":"invalid_api_key"}}
+    at eI.makeStatusError (… node_modules_groq-sdk_index_mjs …)
+
+  Shape of the configured key, inspected without printing it:
+
+    { length: 84, prefix: "xai-", looksLikeGroq: false,
+      hasQuotes: false, hasSpaces: false }
+
+  Root cause: **`xai-` is an xAI key, not a Groq key.** Groq keys are
+  issued by console.groq.com and begin with `gsk_`. xAI is the company
+  behind the Grok models, at x.ai, and its keys begin with `xai-`. Two
+  different vendors whose names differ by one letter. The value in
+  GROQ_API_KEY is well-formed and non-empty — it is simply for the wrong
+  service, so Groq rejects it at authentication.
+
+  No `ai_usage` row was written for the attempt, which is correct: the
+  SDK threw before `reportUsage`, so nothing was consumed and nothing is
+  billed. `ai_usage` still holds four rows, all `provider = anthropic`.
+
+────────────────────────────────────────────────────────────────────────
+WHAT THIS DOES AND DOES NOT TELL US
+────────────────────────────────────────────────────────────────────────
+
+  The fence-stripping question is UNANSWERED. The call never reached a
+  model, so `stripCodeFence` never ran and no comparison against
+  Anthropic's behaviour is possible yet.
+
+  What can be said in advance, from reading the adapter: Groq is a third
+  distinct mechanism, not a repeat of either provider already exercised.
+
+    Anthropic  responseSchema is never sent. Free text, and
+               claude-haiku-4-5 wraps it in a markdown fence despite the
+               prompt forbidding it — stripCodeFence is what makes triage
+               work at all on this path.
+    OpenAI     response_format: { type: "json_schema", strict: true } —
+               the schema itself is enforced by the vendor.
+    Groq       response_format: { type: "json_object" } — JSON mode. The
+               reply is constrained to be valid JSON, which should make a
+               code fence impossible and leave stripCodeFence a no-op,
+               but the SCHEMA is not sent, so shape is unconstrained and
+               Zod remains the only gate.
+               (dist/groq.js:147-149)
+
+  That prediction is worth recording precisely because it is untested.
+  It should be confirmed or refuted against a working key, not assumed.
+
+  What the rehearsal did prove, and it is the point of rehearsing:
+
+  1. The switch is genuinely one config line with zero route edits.
+  2. The degradation path holds against a provider that is not merely
+     slow or malformed but flatly unauthenticated. The ticket was still
+     created, the request still returned 201, the failure was logged with
+     status and message and no ticket content, and nothing partial was
+     persisted. AI is an enhancement, not a gate — verified now against a
+     third distinct failure mode, after a fenced reply and a missing
+     schema.
+  3. `aiden doctor` validates that a required variable is PRESENT, not
+     that it is usable, and not that it is even the right vendor's. It
+     reported "all 4 required vars present" and "All checks passed" over
+     a key that authenticates nowhere. Worth stating plainly: a green
+     doctor is not a working integration.
+
+────────────────────────────────────────────────────────────────────────
+STATE LEFT BEHIND
+────────────────────────────────────────────────────────────────────────
+
+  defaultProvider reverted to "anthropic" and rebuilt; tsc, lint and
+  build at zero. The rehearsal ticket was deleted — 12 tickets, zero
+  outside the seed fixture set. The only uncommitted change is
+  .env.example.
+
+  To finish this rehearsal, replace GROQ_API_KEY in .env.local with a key
+  from console.groq.com beginning with `gsk_`, then re-run. If Grok
+  (xAI) is what was actually intended, that is a different provider
+  entirely and is not one of the six aiden-ai supports.
