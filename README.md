@@ -72,13 +72,17 @@ npm run prisma:merge     # compose prisma/fragments/*.prisma -> prisma/schema.pr
 npx prisma validate      # catches relation and syntax errors without touching the DB
 npm run db:migrate       # create + apply migrations
 npx prisma generate      # migrate dev does not always regenerate; do it explicitly
-npx tsx --env-file=.env.local prisma/seed.ts
+npm run db:seed          # idempotent — safe to re-run
 ```
 
-**`npm run db:seed` does not work.** Prisma 7 stopped reading the `prisma.seed`
-field in `package.json` and expects `migrations.seed` in `prisma.config.ts`
-instead. Use the `tsx` command above; `--env-file` is needed because tsx does
-not load `.env.local` on its own.
+The seed command lives in `migrations.seed` in `prisma.config.ts`. Prisma 7
+stopped reading the `prisma.seed` field in `package.json`, so a project that
+only sets the old key gets "No seed command found" from `prisma db seed`.
+
+**`prisma migrate reset` does not seed.** Prisma 7 removed seed-on-reset — the
+`--skip-seed` flag is gone from both `migrate reset` and `migrate dev`. Reset
+applies the migrations and leaves every table empty regardless of
+`migrations.seed`, so run `npm run db:seed` afterwards.
 
 Never hand-edit `prisma/schema.prisma` — it is generated. Add a fragment under
 `prisma/fragments/` and re-run the merge.

@@ -217,9 +217,11 @@ so a naïve retry will attempt the whole upgrade again.
 
 1. Read the migration error. `npx prisma migrate status` shows what applied.
 2. If the failure is a drift or a partially-applied migration on a **local dev**
-   database, `npx prisma migrate reset` and re-seed
-   (`npx tsx --env-file=.env.local prisma/seed.ts`). The seed is idempotent —
-   verified by running it twice with identical row counts.
+   database, `npx prisma migrate reset` and then re-seed with
+   `npm run db:seed`. The re-seed is a separate step and not optional —
+   Prisma 7 removed seed-on-reset, so reset leaves every table empty even
+   with `migrations.seed` configured. The seed is idempotent — verified by
+   running it twice with identical row counts.
 3. On anything that is not disposable, resolve the migration forward rather
    than resetting.
 4. Only then re-run the upgrade.

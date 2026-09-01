@@ -8,12 +8,17 @@
  *
  * Run with:
  *
- *   npx tsx --env-file=.env.local prisma/seed.ts
+ *   npm run db:seed
  *
- * `npm run db:seed` does NOT work on Prisma 7 — the CLI stopped reading
- * package.json's `prisma.seed` field and expects `migrations.seed` in
- * prisma.config.ts instead. That gap is left as-is rather than quietly
- * widening the plan's file list; see the phase 1 report.
+ * That works because `migrations.seed` is set in prisma.config.ts. Prisma 7
+ * stopped reading package.json's `prisma.seed` field, so until 2026-09-01
+ * this script was reachable only by invoking tsx directly, and the
+ * discrepancy was documented instead of fixed. Invoking tsx by hand still
+ * works if you want to bypass the CLI.
+ *
+ * `prisma migrate reset` still will not seed — Prisma 7 dropped that
+ * behaviour entirely, so reset leaves an empty database and this has to be
+ * run afterwards.
  */
 
 import { PrismaClient } from "../src/generated/prisma/client";

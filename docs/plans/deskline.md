@@ -210,6 +210,19 @@ repository's actual state. Pending approval.
 >   `script-src 'self'` breaks this app in a way a nonce cannot repair —
 >   both documented in `src/proxy.ts` and measured in
 >   `docs/evidence/security-headers-2026-09-01.txt`.
+> - **D14 · 2026-09-01 · `migrations.seed` added to `prisma.config.ts` and the
+>   dead `prisma` key removed from `package.json`.** The second item the
+>   one-directional check in D13 could not see. Phase 1 found that
+>   `npm run db:seed` fails on Prisma 7 and **documented the workaround
+>   instead of making the one-line fix** — the change was one line, in a file
+>   the plan already listed, and writing the workaround into the README cost
+>   more effort than fixing it. Root cause of the choice: treating "the plan's
+>   file list is the scope" as a reason not to fix a defect the build had just
+>   surfaced. Verifying the fix then falsified a claim made alongside it:
+>   setting `migrations.seed` does **not** make `prisma migrate reset` seed —
+>   Prisma 7 removed that behaviour, proven on a throwaway database, so the
+>   README now says reset leaves the tables empty. Recorded in
+>   `.claude/fixes/prisma.md`.
 
 ---
 

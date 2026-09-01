@@ -256,7 +256,7 @@ holds across all three. `docs/evidence/provider-switch-2026-08-22.txt`.
 ## Reset between runs
 
 ```bash
-npx tsx --env-file=.env.local prisma/seed.ts
+npm run db:seed
 ```
 
 Idempotent — verified by running it twice with identical row counts. It restores

@@ -1,2 +1,3 @@
 [2026-08-22 01:45] completed security(review): security review on certification — PASS (1 HIGH found and resolved: full Prisma model in POST /api/tickets responses)
 [2026-09-01 17:25] completed test(runtime): end-to-end verification with securityHeaders proxy active — 8 pages render, AI triage + SSE draft work, 40/40 tests, 16/16 probes, no regression
+[2026-09-01 17:52] completed chore(prisma): migrations.seed in prisma.config.ts, legacy package.json prisma key removed — npm run db:seed works; discovered migrate reset does not seed on Prisma 7, docs corrected
