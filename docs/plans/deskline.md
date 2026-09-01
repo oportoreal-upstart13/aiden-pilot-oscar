@@ -237,6 +237,24 @@ repository's actual state. Pending approval.
 >   is the case for CI. Recorded as an addendum in
 >   `docs/evidence/security-review-2026-08-22.md` rather than by editing the
 >   dated scan table, which was correct when written.
+> - **D16 · 2026-09-01 · CI added (`.github/workflows/ci.yml`) plus
+>   `scripts/check-plan-files.mjs`.** The plan had no CI, and the two defects
+>   found after delivery share one property: both were invisible to a green
+>   local checkout. `check-plan-files.mjs` closes the D13 hole by running the
+>   direction the manual check never ran, and is proven to fail — verified
+>   against both a removed `src/proxy.ts` and a resurrected
+>   `impersonate/route.ts`, not just against a passing tree. Two design points
+>   worth recording. First, `integrity` and `vulnerabilities` need no
+>   `npm install`, so a missing registry credential cannot silently disable
+>   the two jobs guarding the defects that already happened. Second, the
+>   `summary` job fails when a required job was *skipped*: GitHub does not
+>   redden a workflow for skipped jobs, so without it a missing token would
+>   have produced a green tick over a pipeline running half its jobs — the
+>   same false-green class as D13. The build-output assertion was chosen by
+>   experiment, not documentation: `.next/server/middleware.js` is present
+>   with `src/proxy.ts` and absent without it, whereas
+>   `middleware-manifest.json` reads empty in **both** cases under Next 16 and
+>   would have been a vacuous check.
 
 ---
 

@@ -1,0 +1,290 @@
+# DeskLine CI
+#
+# This pipeline exists because two defects shipped past a fully green local
+# checkout, and neither was the kind a test can catch:
+#
+#   1. `src/proxy.ts` was named in the plan and never created, so the app
+#      served no security headers. Build, typecheck, lint, 40 tests and 16
+#      probes were all green — none of them can observe a file that is not
+#      there. The `integrity` job asks that question.
+#   2. Two `mysql2` advisories were published after a security review that
+#      reported 0/0/0/0. A clean scan is true on its date and nowhere else.
+#      The `vulnerabilities` job re-asks it, including on a schedule, because
+#      nobody re-runs a scanner by hand.
+#
+# Deliberate design point: the `summary` job at the bottom fails when a
+# required job was skipped rather than passed. Skipped jobs do not turn a
+# workflow red on their own, so without it a missing registry token would
+# produce a green tick over a pipeline that ran almost nothing — the exact
+# false-green this pipeline was written to prevent.
+
+name: CI
+
+on:
+  push:
+    branches: [main, certification]
+  pull_request:
+  schedule:
+    # Mondays 06:17 UTC. The offset is intentional; on-the-hour crons are the
+    # most contended slots on shared runners.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # Needs no dependencies, so it runs everywhere — including PRs from forks,
+  # where secrets are structurally unavailable.
+  # ─────────────────────────────────────────────────────────────────────
+  integrity:
+    name: Plan integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # Pure Node, zero dependencies — that is what lets it run before install.
+      - name: Every file the plan names must exist
+        run: node scripts/check-plan-files.mjs
+
+  vulnerabilities:
+    name: Dependency scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # osv-scanner reads package-lock.json directly. No install, no registry
+      # auth, so this job cannot be disabled by a missing token — which
+      # matters, because it is the job guarding the thing that already
+      # regressed once.
+      - name: osv-scanner against the lockfile
+        uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
+        with:
+          scan-args: |-
+            --lockfile=package-lock.json
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Everything below needs `node_modules`, and every @upstart13-com/* package
+  # resolves from npm.pkg.github.com. The automatic GITHUB_TOKEN is scoped to
+  # this repository and cannot read another organisation's packages, so a PAT
+  # with read:packages is required. See the README for how to add it.
+  # ─────────────────────────────────────────────────────────────────────
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      has-token: ${{ steps.probe.outputs.has-token }}
+    steps:
+      - id: probe
+        env:
+          AIDEN_NPM_TOKEN: ${{ secrets.AIDEN_NPM_TOKEN }}
+        run: |
+          if [ -n "$AIDEN_NPM_TOKEN" ]; then
+            echo "has-token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=AIDEN_NPM_TOKEN missing::Install-dependent jobs will be skipped. On a fork PR this is expected; on this repository it means CI is verifying far less than it appears to."
+          fi
+
+  verify:
+    name: Typecheck, lint, build
+    needs: preflight
+    if: needs.preflight.outputs.has-token == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Authenticate to GitHub Packages
+        env:
+          AIDEN_NPM_TOKEN: ${{ secrets.AIDEN_NPM_TOKEN }}
+        run: |
+          {
+            echo "@upstart13-com:registry=https://npm.pkg.github.com"
+            echo "//npm.pkg.github.com/:_authToken=${AIDEN_NPM_TOKEN}"
+          } >> .npmrc
+
+      # `npm ci` and not `npm install`: it installs exactly the lockfile and
+      # fails if package.json has drifted from it, which is a check in itself.
+      - run: npm ci
+
+      # npm audit needs the advisory endpoint rather than node_modules, but it
+      # is placed here because the scoped registry entry has to exist first.
+      # osv-scanner already covers this lockfile unconditionally above; this is
+      # the second opinion, not the only one.
+      - name: npm audit
+        run: npm audit --audit-level=high
+
+      - run: npx tsc --noEmit
+      - run: npm run lint
+
+      # The build composes the Prisma fragments and generates the client, so it
+      # needs a DATABASE_URL shaped correctly — it is never connected to.
+      - name: Build
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          AUTH_SECRET: build-only-not-a-real-secret
+          AUTH_URL: http://localhost:3000
+        run: npm run build
+
+      # The middleware is the thing that went missing, and deleting the file
+      # is not a build error — `npm run build` exits 0 without it. So the
+      # build output is asserted on directly.
+      #
+      # `.next/server/middleware.js` is the signal, and it was chosen by
+      # experiment rather than by reading the docs: with src/proxy.ts present
+      # the file exists, without it the file is absent, both confirmed by
+      # building each way. The obvious-looking alternative is a trap —
+      # `.next/server/middleware-manifest.json` reads
+      # `{"middleware":{},"sortedMiddleware":[],"functions":{}}` in *both*
+      # cases under Next 16, so a check against it would pass no matter what
+      # and prove nothing. `.next/routes-manifest.json` never mentions
+      # middleware at all.
+      - name: The proxy must be registered in the build output
+        run: |
+          if [ ! -f .next/server/middleware.js ]; then
+            echo "::error title=Middleware missing::The build produced no .next/server/middleware.js, which means src/proxy.ts was not compiled in. That file serves every security header, and its absence is not a build error."
+            exit 1
+          fi
+          echo "OK  .next/server/middleware.js present ($(wc -c < .next/server/middleware.js) bytes)"
+
+  suites:
+    name: Tests and smoke probes
+    needs: preflight
+    if: needs.preflight.outputs.has-token == 'true'
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # The official image ships contrib, which is where citext lives — the
+        # email column depends on it, so a slimmer image would fail migrating.
+        image: postgres:17
+        env:
+          POSTGRES_USER: deskline
+          POSTGRES_PASSWORD: deskline
+          POSTGRES_DB: deskline_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U deskline"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://deskline:deskline@localhost:5432/deskline_ci
+      AUTH_SECRET: ci-only-not-a-real-secret
+      AUTH_URL: http://localhost:3100
+      SMOKE_BASE: http://localhost:3100
+      SEED_PASSWORD: DeskLine!Seed1
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Authenticate to GitHub Packages
+        env:
+          AIDEN_NPM_TOKEN: ${{ secrets.AIDEN_NPM_TOKEN }}
+        run: |
+          {
+            echo "@upstart13-com:registry=https://npm.pkg.github.com"
+            echo "//npm.pkg.github.com/:_authToken=${AIDEN_NPM_TOKEN}"
+          } >> .npmrc
+
+      - run: npm ci
+
+      - name: Apply migrations
+        run: npm run prisma:merge && npx prisma migrate deploy
+
+      # Goes through the npm script rather than tsx directly, so a regression
+      # in `migrations.seed` fails here instead of being discovered by hand.
+      - name: Seed
+        run: npm run db:seed
+
+      - run: npm run build
+
+      # Both suites run over HTTP against a production build — nothing is
+      # stubbed, so the real withAuth -> parseRequest -> org-scoped query ->
+      # ownership -> ability chain executes in its real order.
+      - name: Start the production server
+        run: |
+          npm start -- -p 3100 > server.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null http://localhost:3100/login; then
+              echo "server up"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error title=Server never became ready::"; cat server.log; exit 1
+
+      # Neither suite creates a valid ticket — every POST carries a body that
+      # fails validation, and the draft probe is a viewer denied at the ability
+      # check. So no provider key is needed and no AI call is billed.
+      - name: Route-handler tests
+        run: npm test
+
+      - name: Smoke probes
+        run: npm run smoke
+
+      - name: Server log on failure
+        if: failure()
+        run: cat server.log
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Turns "skipped" into "failed" on the branches where it matters. Without
+  # this the workflow reports success when the install-dependent jobs never
+  # ran, which is precisely the green-over-nothing this pipeline exists to
+  # stop. Fork PRs are exempt: they cannot see secrets, and that is not a
+  # defect in the pull request.
+  # ─────────────────────────────────────────────────────────────────────
+  summary:
+    name: Required jobs ran
+    if: always()
+    needs: [integrity, vulnerabilities, verify, suites]
+    runs-on: ubuntu-latest
+    steps:
+      - name: No job may be skipped or failed on a trusted ref
+        env:
+          RESULTS: >-
+            integrity=${{ needs.integrity.result }}
+            vulnerabilities=${{ needs.vulnerabilities.result }}
+            verify=${{ needs.verify.result }}
+            suites=${{ needs.suites.result }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork == true }}
+        run: |
+          echo "$RESULTS"
+          failed=0
+          for pair in $RESULTS; do
+            name="${pair%%=*}"
+            result="${pair##*=}"
+            case "$result" in
+              success) ;;
+              skipped)
+                if [ "$IS_FORK" = "true" ]; then
+                  echo "::notice::$name skipped — fork PRs cannot read secrets, which is expected."
+                else
+                  echo "::error title=$name was skipped::A skipped job is not a passing job. CI verified less than it appears to."
+                  failed=1
+                fi
+                ;;
+              *)
+                echo "::error title=$name $result::"
+                failed=1
+                ;;
+            esac
+          done
+          exit "$failed"

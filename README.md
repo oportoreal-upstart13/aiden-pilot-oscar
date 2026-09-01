@@ -216,6 +216,40 @@ capture in `docs/evidence/`.
 npm run typecheck && npm run lint && npm run build
 npm test
 npm run smoke            # with a production build running
+node scripts/check-plan-files.mjs
 ```
 
 Then `/security-review`. It is enforced by `/ship`.
+
+## CI
+
+`.github/workflows/ci.yml` runs on pushes to `main` and `certification`, on
+every pull request, and weekly on a schedule.
+
+| Job               | What it does                                     | Needs install |
+| ----------------- | ------------------------------------------------ | ------------- |
+| `integrity`       | every file `docs/plans/deskline.md` names exists  | no            |
+| `vulnerabilities` | `osv-scanner` against `package-lock.json`         | no            |
+| `verify`          | `npm audit`, `tsc`, `lint`, `build`               | yes           |
+| `suites`          | migrate, seed, 40 tests + 16 probes on Postgres   | yes           |
+| `summary`         | fails if any of the above was skipped             | no            |
+
+The first two need no dependencies, which is deliberate: they are the two
+that guard defects which already shipped past a green local checkout, so
+they must not be disableable by a missing credential.
+
+### The one secret you have to add
+
+`npm ci` cannot resolve `@upstart13-com/*` without a token. Actions' automatic
+`GITHUB_TOKEN` is scoped to this repository and **cannot** read packages
+belonging to the `upstart13-com` organisation, so a PAT with `read:packages`
+is required:
+
+```bash
+gh secret set AIDEN_NPM_TOKEN
+```
+
+Until it exists, `verify` and `suites` skip — and the `summary` job turns the
+run **red** rather than letting a green tick sit over a pipeline that ran two
+jobs out of four. A skipped job is not a passing job. Pull requests from forks
+are exempt, since they cannot read secrets at all and that is not their fault.
