@@ -10,11 +10,19 @@
 | Prisma           | `prisma.md`           | 3       | 1 of 3                 | 2026-03-09   | Stable |
 | AIDEN Security   | `aiden-security.md`   | 1       | 1 of 1                 | 2026-08-21   | New    |
 | AIDEN AI         | `aiden-ai.md`         | 2       | 2 of 2                 | 2026-08-21   | New    |
-| Testing          | `testing.md`          | 3       | 1 of 3                 | 2026-08-22   | New    |
+| Testing          | `testing.md`          | 4       | 1 of 4                 | 2026-09-01   | New    |
 | AIDEN CLI        | `aiden-cli.md`        | 4       | 0 of 4                 | 2026-08-22   | New    |
 | AIDEN Auth       | `aiden-auth.md`       | 1       | 1 of 1                 | 2026-08-22   | New    |
 
-**Total: 29 active entries across 9 categories · 10 structurally prevented**
+**Total: 30 active entries across 9 categories · 10 structurally prevented**
+
+> On 2026-09-01 an external assessment found that `src/proxy.ts` had never been
+> created and the app served no security headers — while every suite in this
+> repository passed and the plan's verification table recorded that row as
+> PASS. The new `testing.md` entry is about the check, not the file: it only
+> ever ran in one direction, and a one-directional diff cannot see an absence.
+> It is **not** marked structurally prevented — the reverse check has been run
+> by hand once, but nothing yet runs it automatically.
 
 > On 2026-08-21 the hardcoded-colour entry in `ui.md` was found to be claiming
 > `[STRUCTURALLY PREVENTED]` by an ESLint rule that did not exist in this

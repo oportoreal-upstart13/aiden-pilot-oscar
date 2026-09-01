@@ -1,0 +1,78 @@
+DeskLine — security headers middleware (src/proxy.ts)
+Date: 2026-09-01
+Closes the assessment gap: "no securityHeaders middleware — zero security
+headers on a live response".
+
+════════ LIVE RESPONSE — GET /login, production build ════════
+
+HTTP/1.1 200 OK
+content-security-policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'
+permissions-policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
+referrer-policy: strict-origin-when-cross-origin
+x-content-type-options: nosniff
+x-dns-prefetch-control: off
+x-frame-options: DENY
+
+════════ SAME HEADERS ON AN API ROUTE — GET /api/orgs ════════
+
+HTTP/1.1 401 Unauthorized
+content-security-policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: https:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'
+referrer-policy: strict-origin-when-cross-origin
+x-content-type-options: nosniff
+x-dns-prefetch-control: off
+x-frame-options: DENY
+
+════════ WHY THE PACKAGE DEFAULT CSP COULD NOT BE SHIPPED ════════
+
+The package default is script-src 'self'. Next's App Router emits inline
+<script> tags for the RSC flight payload. Shipping that CSP unchanged
+blocks them: the page renders from SSR HTML and never hydrates, so no
+form submits and no draft streams. It looks perfect under curl -I.
+
+The nonce alternative was implemented and MEASURED before being rejected.
+Next does read a nonce from the content-security-policy REQUEST header
+(getScriptNonceFromHeader). Results with a per-request nonce:
+
+  route                  scripts  inline  with_nonce  inline_WITHOUT_nonce
+  /login    (static)        20      3         0              3
+  /register (static)        20      3         0              3
+  / (dynamic)               18      3        17              1
+
+Three independent reasons it does not work here:
+  1. /login and /register are statically prerendered — their HTML is
+     written at build time, so a per-request nonce cannot be in it.
+     Those are the entry points.
+  2. The one inline script that never takes a nonce even on a dynamic
+     route is next-themes' anti-flash script, injected by ThemeProvider.
+     It is rendered by a component, not by Next's script pipeline:
+       ((a,b,c,d,e,f,g,h)=>{let i=document.documentElement,j=["light","dark"]…
+  3. A nonce and 'unsafe-inline' cannot back each other up — browsers
+     ignore 'unsafe-inline' whenever a nonce is present.
+
+So script-src carries 'unsafe-inline'. That is a real cost, stated
+plainly: it is the directive that would otherwise blunt injected-script
+XSS. Every other directive stays strict — frame-ancestors 'none',
+object-src 'none', base-uri 'self', form-action 'self', connect-src
+'self' — and those are not decoration.
+
+════════ NO INLINE SCRIPT IS BLOCKED ════════
+
+  /login       inline scripts=3  allowed by script-src 'self' 'unsafe-inline'
+  /register    inline scripts=3  allowed by script-src 'self' 'unsafe-inline'
+  /            inline scripts=3  allowed by script-src 'self' 'unsafe-inline'
+
+════════ HSTS IS GATED ON THE DEPLOYMENT BEING HTTPS ════════
+
+Absent above because AUTH_URL is http://localhost:3100. Gating on
+NODE_ENV would not have worked: next start runs in production mode, so
+a NODE_ENV check still emits HSTS from localhost — which pins localhost
+to HTTPS for two years including subdomains, breaking every other
+plain-HTTP project on the machine.
+
+════════ NOTHING REGRESSED ════════
+
+  tsc --noEmit    exit 0
+  npm run lint    exit 0
+  npm run build   exit 0  — 'ƒ Proxy (Middleware)' in the route manifest
+  npm test        40/40
+  npm run smoke   16/16   (every probe now traverses the middleware)

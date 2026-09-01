@@ -193,6 +193,23 @@ repository's actual state. Pending approval.
 >   whichever population was already registered the other way. Zero existing
 >   rows collide under the new semantics, checked before applying. Recorded in
 >   `.claude/fixes/aiden-auth.md` and owed upstream.
+> - **D13 · 2026-09-01 · `src/proxy.ts` was in the plan and never landed.**
+>   Unlike D1–D12, this is not a file that arrived outside the plan — it is a
+>   file the plan called for that silently did not arrive. No response in the
+>   app ever carried a security header, and neither the 40 tests nor the 16
+>   probes asserted on one, so nothing failed. An external assessment found it.
+>   Root cause is the verification method, not the omission: row 7 of the
+>   verification table compared `git diff --stat` against the plan's file list
+>   **in one direction only** — it asked which files landed that the plan did
+>   not name, and never asked which files the plan named that did not land.
+>   A one-directional diff cannot see an absence. The same hole let
+>   `migrations.seed` through. Landing the file also surfaced two things worth
+>   recording: `securityHeaders` is a factory that must be called (the
+>   package's own docstring shows `export { securityHeaders as middleware }`,
+>   which wires up a no-op that looks correct), and the default
+>   `script-src 'self'` breaks this app in a way a nonce cannot repair —
+>   both documented in `src/proxy.ts` and measured in
+>   `docs/evidence/security-headers-2026-09-01.txt`.
 
 ---
 
@@ -924,7 +941,7 @@ and what came back. Captures in `docs/evidence/`.
 | 6 | Audit events | Queried against real rows, with `jsonb_object_keys` to compare metadata shape rather than eyeball it. All **seven** planned domain events present with exactly the specified keys, plus the three auto-emitted ones relied on. | **PASS.** Verification itself closed a gap: `ticket.update` and `ticket.close` had **never fired** in the whole build until this run — no probe or test reached a successful mutation. Exercised and confirmed. |
 | 6 | Sink swappability | The flag flipped to `"file"`, a ticket created, and absence from `audit_logs` proved by querying the new ticket's `resource_id` (0 rows) rather than inferred from an unchanged total. Reverted and re-verified in the other direction. | **PASS.** `src/lib/audit-sinks.ts`, `docs/evidence/audit-sink-swap-2026-08-22.txt`. This was the last named capability in the plan with nothing behind it. |
 | 6 | Cost telemetry | 6 `AIUsage` rows across **both providers on both AI paths** — Anthropic 4 calls / 2 routes, Groq 2 calls / 2 routes. Every count provider-reported; the estimated-usage fallback was never needed. | **PASS** |
-| 7 | Files touched | `git diff 9245060...HEAD --stat` → 90 files, +25,571 / −345. Both committed deletions executed and absent from the build's route manifest. | **PASS.** Eleven files landed outside the plan's list, all recorded as D1–D11. |
+| 7 | Files touched | `git diff 9245060...HEAD --stat` → 90 files, +25,571 / −345. Both committed deletions executed and absent from the build's route manifest. | ~~PASS~~ → **FAIL, corrected 2026-09-01.** Eleven files landed outside the plan's list, all recorded as D1–D11 — but the check only ran in that one direction. It never asked which planned files were *missing*, and `src/proxy.ts` was. See D13; re-run both ways before trusting this row. |
 | 8 | Rollback | Exercised for real rather than described: the provider switch reverted in one line, a `defaultProvider` change rebuilt both ways, the last-owner test restored via a full round trip, and every throwaway ticket removed — 12 tickets, **zero outside the seed fixture set**. | **PASS.** The database is in its seeded state after the verification run. |
 
 **Two things this table does not claim.** The Prisma Studio screenshot is not
