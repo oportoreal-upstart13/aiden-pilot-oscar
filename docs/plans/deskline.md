@@ -223,6 +223,20 @@ repository's actual state. Pending approval.
 >   Prisma 7 removed that behaviour, proven on a throwaway database, so the
 >   README now says reset leaves the tables empty. Recorded in
 >   `.claude/fixes/prisma.md`.
+> - **D15 · 2026-09-01 · `overrides.mysql2` pinned to `^3.24.2`.** Not a
+>   deviation from the plan so much as from the security review's expiry date.
+>   Two advisories against `mysql2@3.15.3` — GHSA-3f6p-5ww8-9rcr (HIGH, auth
+>   plugin downgrade leaking a plaintext credential) and GHSA-rgwj-5xj2-c3m3
+>   (MODERATE) — were published on 2026-08-31 and 2026-09-01, after the
+>   2026-08-22 scan that reported 0/0/0/0. Exposure was nil: `mysql2` enters
+>   only through `prisma`'s MySQL connector and this app is PostgreSQL via
+>   `@prisma/adapter-pg`, so the module is never loaded. Cleared anyway,
+>   because "unreachable" stops being true the day someone adds a MySQL
+>   datasource. Root cause of the gap is not the advisory but that nothing in
+>   the repository re-runs the scanners — a green report ages silently. That
+>   is the case for CI. Recorded as an addendum in
+>   `docs/evidence/security-review-2026-08-22.md` rather than by editing the
+>   dated scan table, which was correct when written.
 
 ---
 

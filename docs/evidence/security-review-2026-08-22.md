@@ -150,3 +150,57 @@ cookie, and role-based denial against a running production build
 containment on the AI surface is an empirical result against one payload and
 one model on one date, not a guarantee
 (`docs/evidence/injection-probe-2026-08-21.txt`).
+
+---
+
+## Addendum · 2026-09-01 · two mysql2 advisories published after this review
+
+The scan table above reported 0/0/0/0 and was accurate on 2026-08-22. It did
+not stay accurate, and the reason is worth stating plainly: **a clean scan is
+true on its date and nowhere else.** Two advisories against `mysql2@3.15.3`
+were published *after* this review ran —
+
+| Advisory              | Severity | Fixed in | Published  |
+| --------------------- | -------- | -------- | ---------- |
+| GHSA-3f6p-5ww8-9rcr   | HIGH     | 3.22.0   | 2026-08-31 |
+| GHSA-rgwj-5xj2-c3m3   | MODERATE | 3.23.1   | 2026-09-01 |
+
+The HIGH is an auth-plugin downgrade to `mysql_clear_password` that leaks the
+plaintext credential. By 2026-09-01 `npm audit` reported 2 HIGH — one for
+`mysql2`, one for `prisma` as its dependent.
+
+**Exposure here was nil, and that is the honest framing rather than a
+mitigation.** `mysql2` reaches this tree only through `prisma`, which pins it
+at exactly `3.15.3` for its MySQL connector. DeskLine is PostgreSQL via
+`@prisma/adapter-pg`; there is no MySQL datasource, no MySQL connection string,
+and no reference to `mysql` anywhere in `src/`, `prisma/`, `scripts/` or
+`aiden.config.ts`. The module is never loaded at runtime. The advisories were
+therefore a supply-chain finding to clear, not an exploitable path to close —
+but "unreachable" is an argument that stops being true the moment someone adds
+a MySQL datasource, so it is not a reason to leave it.
+
+**Fix:** an `overrides` entry forcing `mysql2` to `^3.24.2`, the same mechanism
+already used for `deepmerge-ts`. Resolved 3.15.3 → 3.24.2.
+
+**Verified after the change:**
+
+```
+npm audit                                   found 0 vulnerabilities
+osv-scanner --lockfile package-lock.json    No issues found (934 packages)
+```
+
+The lockfile delta is confined to the `mysql2` subtree — `denque`, `seq-queue`
+and `sqlstring` out, `sql-escaper` in, four packages, 23 insertions / 30
+deletions. Zero lines mentioning `@upstart13-com`, checked explicitly, because
+overriding a version `prisma` pins exactly is the kind of change that can
+quietly drag other resolutions with it.
+
+`tsc --noEmit` clean, `eslint` clean, `npm run build` green with
+`ƒ Proxy (Middleware)` present in the route manifest, **40/40** tests and
+**16/16** smoke probes passing against a production build on the rebuilt tree.
+
+**What this addendum does not claim.** It does not make the table above current
+for any date after 2026-09-01. Nothing in this repository re-runs these
+scanners; the next advisory will land the same way this one did — silently,
+against a green report. That is the argument for the CI item, not for a
+stronger claim here.
