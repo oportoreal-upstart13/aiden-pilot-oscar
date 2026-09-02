@@ -1,13 +1,4 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(node -e ' *)",
-      "Bash(node scripts/linux-native-deps.mjs)",
-      "Bash(echo \"--- exit $? ---\")",
-      "Bash(sed -i 's|      # npm install rather than npm ci, for the lockfile-portability reason\\\\n      # spelled out in the verify job above.\\\\n||' .github/workflows/ci.yml)",
-      "Bash(node scripts/check-plan-files.mjs)"
-    ]
-  },
   "hooks": {
     "PreToolUse": [
       {
