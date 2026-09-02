@@ -139,7 +139,21 @@ jobs:
       # including next 16.3.1 -> 16.3.4 and prisma 7.9.1 -> 7.10.0. That is a
       # dependency refresh and belongs in its own reviewed change, not
       # smuggled in with a CI pipeline.
-      - run: npm install --no-fund
+      - run: npm ci
+
+      # package-lock.json was generated on Windows and records only the
+      # win32-x64 native binary for each of its six multi-platform families.
+      # On Linux those are *optional* dependencies, so `npm ci` skips the
+      # missing ones, exits 0, and hands the build a tree with no native CSS
+      # transformer — a green install that is not a complete install.
+      # `npm install` does not help either: with a lockfile present npm
+      # prefers it and never re-resolves optionals. Both measured in CI.
+      #
+      # This adds the Linux counterparts at the versions the lockfile
+      # already pins, so the tree matches the lockfile instead of drifting.
+      # See the script for why regenerating the lockfile is a separate change.
+      - name: Add the Linux native binaries the lockfile omits
+        run: npm install --no-save --no-fund $(node scripts/linux-native-deps.mjs)
 
       # npm audit needs the advisory endpoint rather than node_modules, but it
       # is placed here because the scoped registry entry has to exist first.
@@ -228,7 +242,21 @@ jobs:
 
       # npm install rather than npm ci, for the lockfile-portability reason
       # spelled out in the verify job above.
-      - run: npm install --no-fund
+      - run: npm ci
+
+      # package-lock.json was generated on Windows and records only the
+      # win32-x64 native binary for each of its six multi-platform families.
+      # On Linux those are *optional* dependencies, so `npm ci` skips the
+      # missing ones, exits 0, and hands the build a tree with no native CSS
+      # transformer — a green install that is not a complete install.
+      # `npm install` does not help either: with a lockfile present npm
+      # prefers it and never re-resolves optionals. Both measured in CI.
+      #
+      # This adds the Linux counterparts at the versions the lockfile
+      # already pins, so the tree matches the lockfile instead of drifting.
+      # See the script for why regenerating the lockfile is a separate change.
+      - name: Add the Linux native binaries the lockfile omits
+        run: npm install --no-save --no-fund $(node scripts/linux-native-deps.mjs)
 
       - name: Apply migrations
         run: npm run prisma:merge && npx prisma migrate deploy
