@@ -255,6 +255,22 @@ repository's actual state. Pending approval.
 >   with `src/proxy.ts` and absent without it, whereas
 >   `middleware-manifest.json` reads empty in **both** cases under Next 16 and
 >   would have been a vacuous check.
+> - **D17 · 2026-09-02 · `scripts/linux-native-deps.mjs`, found by CI on its
+>   first run.** `package-lock.json` was generated on Windows and records six
+>   platform binaries where a portable lockfile holds 89 — only the
+>   `win32-x64` variant of `esbuild`, `sharp`, `unrs-resolver`,
+>   `lightningcss`, `@tailwindcss/oxide` and `next`. The committed lockfile
+>   has never been installable on Linux, and the reason it went unnoticed is
+>   the same shape as D13: those binaries are *optional*, so `npm ci` skipped
+>   them, **exited 0**, and the failure surfaced one step later in the build.
+>   A green install is not a complete install. Two candidate fixes were tried
+>   and measured before landing a third — `npm install` failed identically in
+>   CI, and `--package-lock-only --os=linux` produced a zero-byte diff.
+>   Regenerating the lockfile does fix it properly but moves 78 versions
+>   (`next` 16.3.1 → 16.3.4, `prisma` 7.9.1 → 7.10.0, an `ajv` 8 → 6
+>   downgrade), so it is left as a separate reviewed change rather than
+>   smuggled in. Recorded in `.claude/fixes/npm.md`. **Open:** the workaround
+>   covers `linux-x64` only — not arm64, Apple Silicon or musl.
 
 ---
 

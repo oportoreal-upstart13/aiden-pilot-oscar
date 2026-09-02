@@ -3,3 +3,4 @@
 [2026-09-01 17:52] completed chore(prisma): migrations.seed in prisma.config.ts, legacy package.json prisma key removed — npm run db:seed works; discovered migrate reset does not seed on Prisma 7, docs corrected
 [2026-09-01 18:09] completed chore(deps): override mysql2 to ^3.24.2, clearing GHSA-3f6p-5ww8-9rcr (HIGH) and GHSA-rgwj-5xj2-c3m3 — npm audit and osv-scanner clean, 40/40 tests, 16/16 probes
 [2026-09-01 18:22] completed ci(github-actions): 5-job pipeline + scripts/check-plan-files.mjs — integrity and dep-scan run without install; summary job fails on skipped jobs to prevent a false green
+[2026-09-02 09:11] completed ci(github-actions): pipeline green end-to-end (6/6 jobs) — discovered the committed lockfile is Windows-only and npm ci exits 0 on an incomplete tree; worked around for linux-x64

@@ -13,8 +13,9 @@
 | Testing          | `testing.md`          | 4       | 1 of 4                 | 2026-09-01   | New    |
 | AIDEN CLI        | `aiden-cli.md`        | 4       | 0 of 4                 | 2026-08-22   | New    |
 | AIDEN Auth       | `aiden-auth.md`       | 1       | 1 of 1                 | 2026-08-22   | New    |
+| npm / Deps       | `npm.md`              | 2       | 1 of 2                 | 2026-09-02   | New    |
 
-**Total: 31 active entries across 9 categories · 10 structurally prevented**
+**Total: 33 active entries across 10 categories · 11 structurally prevented**
 
 > On 2026-09-01 an external assessment found that `src/proxy.ts` had never been
 > created and the app served no security headers — while every suite in this
