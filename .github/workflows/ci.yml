@@ -116,9 +116,30 @@ jobs:
             echo "//npm.pkg.github.com/:_authToken=${AIDEN_NPM_TOKEN}"
           } >> .npmrc
 
-      # `npm ci` and not `npm install`: it installs exactly the lockfile and
-      # fails if package.json has drifted from it, which is a check in itself.
-      - run: npm ci
+      # `npm install`, not `npm ci`, and this is a workaround rather than a
+      # preference.
+      #
+      # package-lock.json was generated on Windows and records only the
+      # win32-x64 native binary for all six multi-platform families it
+      # contains — lightningcss, esbuild, sharp, @next/swc,
+      # @tailwindcss/oxide and unrs-resolver, each of which declares 8-20
+      # variants. On Linux `npm ci` installs exactly the lockfile, and since
+      # those binaries are *optional* dependencies it skips the missing ones
+      # **silently and exits 0**, handing the next step a broken tree. The
+      # build then dies on `Cannot find module
+      # '../lightningcss.linux-x64-gnu.node'`.
+      #
+      # `npm install` resolves against package.json instead, so it fetches
+      # the Linux binaries. The cost is real and worth naming: versions with
+      # a caret range may resolve newer here than the lockfile pins, so this
+      # job is not testing a byte-identical tree.
+      #
+      # The proper fix is to make the lockfile portable, which today means
+      # regenerating it from scratch — measured as 78 version changes
+      # including next 16.3.1 -> 16.3.4 and prisma 7.9.1 -> 7.10.0. That is a
+      # dependency refresh and belongs in its own reviewed change, not
+      # smuggled in with a CI pipeline.
+      - run: npm install --no-fund
 
       # npm audit needs the advisory endpoint rather than node_modules, but it
       # is placed here because the scoped registry entry has to exist first.
@@ -205,7 +226,9 @@ jobs:
             echo "//npm.pkg.github.com/:_authToken=${AIDEN_NPM_TOKEN}"
           } >> .npmrc
 
-      - run: npm ci
+      # npm install rather than npm ci, for the lockfile-portability reason
+      # spelled out in the verify job above.
+      - run: npm install --no-fund
 
       - name: Apply migrations
         run: npm run prisma:merge && npx prisma migrate deploy
